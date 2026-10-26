@@ -124,6 +124,24 @@ class GraphContractsTest {
             assertNotEquals(before,copy.getNodes().get(1).modificationCount());
         }
     }
+    @Test void identityMapsWithOwnedNodeKeysCompareIndependentlyOfTableIterationOrder() {
+        for(int run=0;run<20;run++) {
+            var nodes=OM.Nodes();for(int i=0;i<8;i++) nodes.add(OM.Leaf(new ArrayList<>(List.of("key"+i))));
+            var bindings=new IdentityHashMap<OMLeaf,List<OMLeaf>>();
+            for(int i=0;i<nodes.size();i++) bindings.put(nodes.get(i),new ArrayList<>(List.of(nodes.get((i+1)%nodes.size()))));
+            var graph=OM.Graph(nodes,bindings,bindings);var frozen=OMNodeGraphs.freeze(graph);
+            var copy=(OMGraph)frozen.materialize();var repeated=OMNodeGraphs.freeze(copy);
+            assertEquals(frozen,repeated);assertTrue(frozen.sameSemantics(repeated));assertEquals(frozen.hashCode(),repeated.hashCode());
+            copy.getLinks().get(copy.getNodes().get(0)).clear();var changed=OMNodeGraphs.freeze(copy);
+            assertNotEquals(frozen,changed);assertFalse(frozen.sameSemantics(changed));
+        }
+    }
+    @Test void graphComparisonRetainsContainerAliasIdentity() {
+        var first=OM.Root(new ArrayList<>(List.of("same")),new LinkedHashMap<>(),new LinkedHashSet<>());first.setHistory(first.getNames());
+        var second=OM.Root(new ArrayList<>(List.of("same")),new LinkedHashMap<>(),new LinkedHashSet<>());second.setHistory(new ArrayList<>(List.of("same")));
+        var aliased=OMNodeGraphs.freeze(first);var separate=OMNodeGraphs.freeze(second);
+        assertNotEquals(aliased,separate);assertFalse(aliased.sameSemantics(separate));
+    }
     @Test void nestedReferencesAreVisitedWithoutFollowingTheirTargets() {
         var graph=graph();List<OMElement> references=new ArrayList<>();
         OMNodeGraphs.references(graph,references::add,CHOICE);

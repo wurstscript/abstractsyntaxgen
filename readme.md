@@ -544,7 +544,7 @@ then ownership validation and revision reset. No partially constructed header is
 Each snapshot carries a generated SHA-256 schema identity covering field order, types, ownership,
 source roles and case membership. It is an in-memory boundary, not a supported disk format.
 
-Snapshots compare by canonical content; `sameSemantics` excludes source fields and their otherwise
+Snapshots compare by graph content; `sameSemantics` excludes source fields and their otherwise
 unreachable owned nodes. Reference identities and metadata aliases remain significant. Comparisons
 are independent of incidental scalar object sharing and node numbering. `NodeGraphs.validate(root)`
 checks unique, acyclic ownership and matching parent links without visiting reference targets.
@@ -585,3 +585,9 @@ strict key ordering before it is returned. Identity-map keys keep distinct scala
 when ordinary scalar fields compare by value. Opaque external reference slots are neither traversed
 nor cloned by copy operations. An adapter's `compose` constructs value structure around reference
 leaves; it must not inspect a referenced node's unfinished body during reconstruction.
+
+Snapshot comparison pairs internal nodes by generated ownership slots before comparing reference
+metadata. Identity-map bindings are unordered; object hash-table iteration never chooses node identity
+or comparison order. Scalar keys in identity maps retain their immutable object identities, and other
+external/custom identity keys require stable symbols. Container aliases are compared bijectively,
+so equal contents in two independent mutable containers do not become one shared container.

@@ -99,6 +99,16 @@ final class NodeCodecGenerator {
             out.append("        }\n");
         }
         out.append("        default -> throw new IllegalArgumentException(\"Unknown node kind: \"+data.kind());\n        }\n    }\n");
+        out.append("    public static Set<Integer> ownedFields(String kind) { return switch(kind) {\n");
+        for(AstBaseTypeDefinition def:definitions()) {
+            List<String> indices=new java.util.ArrayList<>();int index=0;
+            if(def instanceof ConstructorDef c) for(Parameter p:c.parameters) { if(!p.isRef && program.hasElement(p.getTyp())) indices.add(""+index);index++; }
+            out.append("        case \""+def.getName(prefix)+"\" -> Set.of("+String.join(", ",indices)+");\n");
+        }
+        out.append("        default -> throw new IllegalArgumentException(\"Unknown node kind: \"+kind);\n    }; }\n");
+        out.append("    public static boolean ownedItems(String kind) { return switch(kind) {\n");
+        for(AstBaseTypeDefinition def:definitions()) out.append("        case \""+def.getName(prefix)+"\" -> "+(def instanceof ListDef list && !list.ref)+";\n");
+        out.append("        default -> throw new IllegalArgumentException(\"Unknown node kind: \"+kind);\n    }; }\n");
         out.append("    public static Set<Integer> sourceFields(String kind) { return switch(kind) {\n");
         for(AstBaseTypeDefinition def:definitions()) {
             List<String> indices=new java.util.ArrayList<>();int i=0;

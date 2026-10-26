@@ -200,39 +200,116 @@ public final class __PREFIX__NodeGraphs {
             this.nodes=List.copyOf(nodes);this.values=List.copyOf(values);
         }
         public String schema() { return schema; }
-        /** Equality includes source fields, metadata aliases and all internal reference identities. */
-        @Override public boolean equals(Object other) {
-            return other instanceof Snapshot snapshot && schema.equals(snapshot.schema) && canonical(false).equals(snapshot.canonical(false));
+        /** Compare graph content, including aliases and reference identity, without hash-table iteration order. */
+        @Override public boolean equals(Object other) { return other instanceof Snapshot snapshot && equivalent(snapshot,false); }
+        /** Hashes ignore aliases conservatively; equality still verifies their one-to-one correspondence. */
+        @Override public int hashCode() {
+            int[] hashes=new int[values.size()];
+            for(int index:order(values)) {
+                Value value=values.get(index);int hash=value.kind().hashCode()+Objects.hashCode(value.atom());
+                if(value.kind().equals("identity-map")) {
+                    int bindings=0;for(int i=0;i<value.links().size();i+=2) bindings+=31*hashes[value.links().get(i)]+hashes[value.links().get(i+1)];
+                    hash=31*hash+bindings;
+                } else for(int link:value.links()) hash=31*hash+hashes[link];
+                hashes[index]=hash;
+            }
+            int hash=schema.hashCode();
+            for(var node:nodes) {
+                hash=31*hash+node.kind().hashCode();for(int field:node.fields()) hash=31*hash+hashes[field];
+                hash=31*hash+node.fields().size();for(int item:node.items()) hash=31*hash+hashes[item];hash=31*hash+node.items().size();
+            }
+            return hash;
         }
-        @Override public int hashCode() { return Objects.hash(schema,canonical(false)); }
-        /** Compare snapshots after excluding fields marked @source, without depending on node allocation order. */
-        public boolean sameSemantics(Snapshot other) { return other!=null && schema.equals(other.schema) && canonical(true).equals(other.canonical(true)); }
-        private record Canonical(List<__PREFIX__NodeCodec.Data<Integer>> nodes,List<Value> values) { }
-        private Canonical canonical(boolean semantics) {
-            List<Integer> nodeInputs=new ArrayList<>(),valueInputs=new ArrayList<>();
-            Map<Integer,Integer> nodeIds=new HashMap<>(),valueIds=new HashMap<>();
-            List<__PREFIX__NodeCodec.Data<Integer>> canonicalNodes=new ArrayList<>();List<Value> canonicalValues=new ArrayList<>();
-            IntUnaryOperator nodeId=id -> nodeIds.computeIfAbsent(id,key->{ int next=nodeInputs.size();nodeInputs.add(key);return next; });
-            IntUnaryOperator valueId=id -> valueIds.computeIfAbsent(id,key->{ int next=valueInputs.size();valueInputs.add(key);return next; });
-            nodeId.applyAsInt(0);int n=0,v=0;
-            while(n<nodeInputs.size() || v<valueInputs.size()) {
-                while(n<nodeInputs.size()) {
-                    var node=nodes.get(nodeInputs.get(n++));List<Integer> fields=new ArrayList<>(),items=new ArrayList<>();
-                    Set<Integer> source=semantics ? __PREFIX__NodeCodec.sourceFields(node.kind()) : Set.of();
-                    for(int i=0;i<node.fields().size();i++) if(!source.contains(i)) fields.add(valueId.applyAsInt(node.fields().get(i)));
-                    for(int item:node.items()) items.add(valueId.applyAsInt(item));
-                    canonicalNodes.add(new __PREFIX__NodeCodec.Data<>(node.kind(),fields,items));
-                }
-                while(v<valueInputs.size()) {
-                    Value value=values.get(valueInputs.get(v++));List<Integer> links=new ArrayList<>();
-                    for(int link:value.links()) links.add(valueId.applyAsInt(link));
-                    Object atom=value.kind().equals("node") ? nodeId.applyAsInt((Integer)value.atom()) : value.atom();
-                    canonicalValues.add(new Value(value.kind(),atom,links));
+        public boolean sameSemantics(Snapshot other) { return other!=null && equivalent(other,true); }
+        private record Pair(int left,int right) { }
+        private record Key(String kind,Object value) { }
+        private static final class ScalarIdentity {
+            final Object value;
+            ScalarIdentity(Object value) { this.value=value; }
+            @Override public boolean equals(Object other) { return other instanceof ScalarIdentity identity && value==identity.value; }
+            @Override public int hashCode() { return System.identityHashCode(value); }
+        }
+        private static int[] unmatched(int size) { int[] result=new int[size];Arrays.fill(result,-1);return result; }
+        /** Pair nodes by their owned paths before inspecting unordered reference-bearing metadata. */
+        private int[][] pairedOwnership(Snapshot other) {
+            int[] forward=unmatched(nodes.size()),reverse=unmatched(other.nodes.size());ArrayDeque<Pair> pending=new ArrayDeque<>();
+            forward[0]=reverse[0]=0;pending.add(new Pair(0,0));
+            while(!pending.isEmpty()) {
+                Pair pair=pending.remove();var left=nodes.get(pair.left());var right=other.nodes.get(pair.right());
+                if(!left.kind().equals(right.kind())) continue;
+                List<Pair> children=new ArrayList<>();
+                for(int field:__PREFIX__NodeCodec.ownedFields(left.kind())) children.add(new Pair(left.fields().get(field),right.fields().get(field)));
+                if(__PREFIX__NodeCodec.ownedItems(left.kind())) for(int i=0;i<Math.min(left.items().size(),right.items().size());i++) children.add(new Pair(left.items().get(i),right.items().get(i)));
+                for(Pair child:children) {
+                    int first=(Integer)values.get(child.left()).atom(),second=(Integer)other.values.get(child.right()).atom();
+                    forward[first]=second;reverse[second]=first;pending.add(new Pair(first,second));
                 }
             }
-            return new Canonical(List.copyOf(canonicalNodes),List.copyOf(canonicalValues));
+            return new int[][] {forward,reverse};
         }
-
+        private boolean[] identityKeys() {
+            boolean[] keys=new boolean[values.size()];
+            for(Value value:values) if(value.kind().equals("identity-map")) for(int i=0;i<value.links().size();i+=2) keys[value.links().get(i)]=true;
+            return keys;
+        }
+        private Object identityKey(int id,int[] mapping) {
+            Value value=values.get(id);
+            return switch(value.kind()) {
+                case "node" -> mapping==null ? new Key("node",value.atom()) : mapping[(Integer)value.atom()]<0 ? null : new Key("node",mapping[(Integer)value.atom()]);
+                case "atom" -> new Key("atom",new ScalarIdentity(value.atom()));
+                case "symbol" -> new Key("symbol",value.atom());
+                default -> throw new IllegalArgumentException("Identity-map keys need a node, scalar or symbolic identity");
+            };
+        }
+        private boolean equivalent(Snapshot other,boolean semantics) {
+            if(!schema.equals(other.schema)) return false;
+            int[][] owned=pairedOwnership(other);int[] forward=unmatched(values.size()),reverse=unmatched(other.values.size());
+            boolean[] leftKeys=identityKeys(),rightKeys=other.identityKeys();
+            Set<Pair> visitedNodes=new HashSet<>();ArrayDeque<Pair> nodePairs=new ArrayDeque<>(),valuePairs=new ArrayDeque<>();nodePairs.add(new Pair(0,0));
+            while(!nodePairs.isEmpty() || !valuePairs.isEmpty()) {
+                while(!nodePairs.isEmpty()) {
+                    Pair pair=nodePairs.remove();if(!visitedNodes.add(pair)) continue;
+                    var left=nodes.get(pair.left());var right=other.nodes.get(pair.right());
+                    if(!left.kind().equals(right.kind()) || left.fields().size()!=right.fields().size() || left.items().size()!=right.items().size()) return false;
+                    Set<Integer> source=semantics ? __PREFIX__NodeCodec.sourceFields(left.kind()) : Set.of();
+                    for(int i=0;i<left.fields().size();i++) if(!source.contains(i)) valuePairs.add(new Pair(left.fields().get(i),right.fields().get(i)));
+                    for(int i=0;i<left.items().size();i++) valuePairs.add(new Pair(left.items().get(i),right.items().get(i)));
+                }
+                while(!valuePairs.isEmpty()) {
+                    Pair pair=valuePairs.remove();Value left=values.get(pair.left()),right=other.values.get(pair.right());
+                    if(!left.kind().equals(right.kind())) return false;
+                    switch(left.kind()) {
+                        case "atom":
+                            if(leftKeys[pair.left()] || rightKeys[pair.right()]) {
+                                if(!leftKeys[pair.left()] || !rightKeys[pair.right()] || left.atom()!=right.atom()) return false;
+                            } else if(!Objects.equals(left.atom(),right.atom())) return false;
+                            continue;
+                        case "symbol": if(!left.atom().equals(right.atom())) return false;continue;
+                        case "node": {
+                            int a=(Integer)left.atom(),b=(Integer)right.atom();if(owned[0][a]!=b) return false;nodePairs.add(new Pair(a,b));continue;
+                        }
+                        default: break;
+                    }
+                    if(forward[pair.left()]>=0 || reverse[pair.right()]>=0) {
+                        if(forward[pair.left()]!=pair.right() || reverse[pair.right()]!=pair.left()) return false;continue;
+                    }
+                    forward[pair.left()]=pair.right();reverse[pair.right()]=pair.left();
+                    if(left.links().size()!=right.links().size()) return false;
+                    if(left.kind().equals("identity-map")) {
+                        Map<Object,Integer> entries=new HashMap<>();
+                        for(int i=0;i<right.links().size();i+=2) {
+                            Object key=other.identityKey(right.links().get(i),owned[1]);if(key==null || entries.put(key,i)!=null) return false;
+                        }
+                        for(int i=0;i<left.links().size();i+=2) {
+                            Integer match=entries.get(identityKey(left.links().get(i),null));if(match==null) return false;
+                            valuePairs.add(new Pair(left.links().get(i),right.links().get(match)));
+                            valuePairs.add(new Pair(left.links().get(i+1),right.links().get(match+1)));
+                        }
+                    } else for(int i=0;i<left.links().size();i++) valuePairs.add(new Pair(left.links().get(i),right.links().get(i)));
+                }
+            }
+            return true;
+        }
         public List<__PREFIX__NodeCodec.Data<Integer>> nodes() { return nodes; }
         public __PREFIX__Element materialize(Adapter adapter) {
             Objects.requireNonNull(adapter);
@@ -303,6 +380,7 @@ public final class __PREFIX__NodeGraphs {
             if(object instanceof External external) result=new Value("symbol",Objects.requireNonNull(adapter.symbol(field,external.value())),List.of());
             else if(scalar(object)) result=new Value("atom",object,List.of());
             else if(object instanceof __PREFIX__Element node && owned.ids().containsKey(node)) result=new Value("node",owned.ids().get(node),List.of());
+            else if(identityKeys.contains(object)) result=new Value("symbol",Objects.requireNonNull(adapter.symbol(field,object)),List.of());
             else {
                 Shape shape=object instanceof __PREFIX__Element ? null : shape(object,adapter);
                 if(shape==null) result=new Value("symbol",Objects.requireNonNull(adapter.symbol(field,object)),List.of());
