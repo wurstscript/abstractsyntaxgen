@@ -83,22 +83,22 @@ final class NodeCodecGenerator {
         out.append("    static "+element+" allocate(String kind) { return switch(kind) {\n");
         for(AstBaseTypeDefinition def:definitions()) out.append("        case \""+def.getName(prefix)+"\" -> new "+def.getName(prefix)+"Impl();\n");
         out.append("        default -> throw new IllegalArgumentException(\"Unknown node kind: \"+kind);\n    }; }\n");
-        out.append("    static <V> void populate("+element+" node, Data<V> data, Decoder<V> d) {\n        node.zzBeginMetadata();\n        try { switch(data.kind()) {\n");
+        out.append("    static <V> void populate("+element+" node, Data<V> data, Decoder<V> d, boolean tracked) {\n        switch(data.kind()) {\n");
         for(AstBaseTypeDefinition def:definitions()) {
-            String name=def.getName(prefix); List<FieldDef> fields=fields(def);
+            String name=def.getName(prefix);List<FieldDef> fields=fields(def);
             int size=(def instanceof ConstructorDef c ? c.parameters.size() : 0)+fields.size();
             out.append("        case \""+name+"\" -> {\n            if(data.fields().size() != "+size+") throw new IllegalArgumentException(\"Invalid fields for "+name+"\");\n            "+name+" result=("+name+")node;\n");
             int i=0;
             if(def instanceof ConstructorDef c) {
                 out.append("            if(!data.items().isEmpty()) throw new IllegalArgumentException(\"Unexpected list items\");\n");
-                for(Parameter p:c.parameters) out.append("            result.set"+upper(p.name)+"("+decode(name,p.name,p.getTyp(),p.isRef,i++)+");\n");
+                for(Parameter p:c.parameters) out.append("            if("+(p.isTracked() ? "tracked" : "!tracked")+") result.set"+upper(p.name)+"("+decode(name,p.name,p.getTyp(),p.isRef,i++)+");\n");
             } else if(def instanceof ListDef l) {
-                out.append("            for(V item:data.items()) result.add(("+type.apply(l.itemType)+")d."+(l.ref ? "restoreReference" : "child")+"("+(l.ref ? "\""+name+".items\", " : "")+"item));\n");
+                out.append("            if(!tracked) for(V item:data.items()) result.add(("+type.apply(l.itemType)+")d."+(l.ref ? "restoreReference" : "child")+"("+(l.ref ? "\""+name+".items\", " : "")+"item));\n");
             }
-            restoreFields(out,name,fields,i);
+            for(FieldDef f:fields) out.append("            if("+(f.isTracked() ? "tracked" : "!tracked")+") result.set"+upper(f.getFieldName())+"(("+type.apply(f.getFieldType())+")d.restoreAttribute(\""+name+"."+f.getFieldName()+"\",data.fields().get("+(i++)+")));\n");
             out.append("        }\n");
         }
-        out.append("        default -> throw new IllegalArgumentException(\"Unknown node kind: \"+data.kind());\n        } } finally { node.zzEndMetadata(); }\n    }\n");
+        out.append("        default -> throw new IllegalArgumentException(\"Unknown node kind: \"+data.kind());\n        }\n    }\n");
         out.append("    public static Set<Integer> sourceFields(String kind) { return switch(kind) {\n");
         for(AstBaseTypeDefinition def:definitions()) {
             List<String> indices=new java.util.ArrayList<>();int i=0;

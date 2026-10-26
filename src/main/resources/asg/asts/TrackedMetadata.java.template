@@ -10,11 +10,17 @@ final class __PREFIX__TrackedMetadata {
         private final Context context = new Context(this);
         private Copier batch;
         Owner(Runnable before, IntConsumer changed) { this.before=before; this.changed=changed; }
-        void begin() {
+        void begin() { begin(null); }
+        void begin(IdentityHashMap<Object,Object> aliases) {
             if(batch!=null) throw new IllegalStateException("Metadata import already active");
-            batch=new Copier(context);
+            batch=new Copier(context,aliases);
         }
         void end() { batch=null; }
+        Object alias(Object value) {
+            if(batch==null) return value;
+            if(batch.aliasMapper==null) batch.aliasMapper=new __PREFIX__NodeGraphs.MetadataMapper(node->node,__PREFIX__NodeGraphs.Adapter.DEFAULT,true,input->batch.copies.containsKey(input) ? batch.copies.get(input) : input);
+            return batch.aliasMapper.map(value);
+        }
         Object copy(Object value) { return (batch==null ? new Copier(context) : batch).copy(value); }
     }
     static final class Handle<T> {
@@ -117,21 +123,39 @@ final class __PREFIX__TrackedMetadata {
         final Object input;
         final Box output;
         final Iterator<?> items;
+        final Comparator<Object> comparator;
+        final boolean sortedMap,sortedSet;
+        final List<Map.Entry<Object,Object>> mapEntries;
+        final List<Object> setEntries;
+        @SuppressWarnings("unchecked")
         Frame(Object input, Box output) {
             this.input = input; this.output = output;
+            Object source=input instanceof MapBox map ? map.data : input instanceof SetBox set ? set.data : input;
+            sortedMap=source instanceof SortedMap<?,?>;sortedSet=source instanceof SortedSet<?>;
+            mapEntries=sortedMap ? new ArrayList<>() : null;setEntries=sortedSet ? new ArrayList<>() : null;
+            comparator=sortedMap ? (Comparator<Object>)((SortedMap<?,?>)source).comparator() : sortedSet ? (Comparator<Object>)((SortedSet<?>)source).comparator() : null;
             items = input instanceof Map<?, ?> map ? map.entrySet().iterator() : ((Collection<?>) input).iterator();
         }
         void append(Object mapKey, Object value) {
-            if (output instanceof MapBox map) map.data.put(mapKey, value);
+            if(sortedMap) mapEntries.add(new AbstractMap.SimpleImmutableEntry<>(mapKey,value));
+            else if(sortedSet) setEntries.add(value);
+            else if (output instanceof MapBox map) map.data.put(mapKey, value);
             else if (output instanceof ListBox list) list.data.add(value);
             else ((SetBox) output).data.add(value);
+        }
+        void finish() {
+            if(sortedMap) ((MapBox)output).data=__PREFIX__NodeGraphs.sortedMap(comparator,mapEntries);
+            if(sortedSet) ((SetBox)output).data=__PREFIX__NodeGraphs.sortedSet(comparator,setEntries);
         }
     }
     private static final class Copier {
         final Context context;
         final IdentityHashMap<Object, Box> copies = new IdentityHashMap<>();
         final Set<Object> visiting = Collections.newSetFromMap(new IdentityHashMap<>());
-        Copier(Context context) { this.context = context; }
+        final IdentityHashMap<Object,Object> aliases;
+        __PREFIX__NodeGraphs.MetadataMapper aliasMapper;
+        Copier(Context context) { this(context,null); }
+        Copier(Context context,IdentityHashMap<Object,Object> aliases) { this.context=context;this.aliases=aliases; }
         @SuppressWarnings({"unchecked", "rawtypes"})
         private Box empty(Object input) {
             if (input instanceof List<?>) return new ListBox(context);
@@ -159,7 +183,7 @@ final class __PREFIX__TrackedMetadata {
                 if (visiting.contains(input)) throw new IllegalArgumentException("Cyclic owned metadata containers are not supported; use node references for cycles");
                 return old;
             }
-            Box result = empty(input); copies.put(input, result); return result;
+            Box result = empty(input); copies.put(input, result); if(aliases!=null) aliases.put(input,result); return result;
         }
         Object copy(Object input) {
             boolean already = copies.containsKey(input);
@@ -171,7 +195,7 @@ final class __PREFIX__TrackedMetadata {
                 visiting.add(input); pending.push(new Frame(input, root));
                 while (!pending.isEmpty()) {
                     Frame frame = pending.peek();
-                    if (!frame.items.hasNext()) { visiting.remove(frame.input); pending.pop(); continue; }
+                    if (!frame.items.hasNext()) { frame.finish();visiting.remove(frame.input); pending.pop(); continue; }
                     Object raw = frame.items.next(), mapKey = null;
                     if (frame.output instanceof MapBox) {
                         Map.Entry<?,?> entry = (Map.Entry<?,?>) raw;
@@ -241,7 +265,7 @@ final class __PREFIX__TrackedMetadata {
     }
     private static final class SetBox extends AbstractSet<Object> implements Box {
         final State state;
-        final Set<Object> data;
+        Set<Object> data;
         SetBox(Context context, Set<Object> data) { state = new State(context); this.data = data; }
         public State state() { return state; }
         public Iterable<?> nestedValues() { return data; }
@@ -271,7 +295,7 @@ final class __PREFIX__TrackedMetadata {
     }
     private static final class MapBox extends AbstractMap<Object,Object> implements Box {
         final State state;
-        final Map<Object,Object> data;
+        Map<Object,Object> data;
         int epoch;
         MapBox(Context context, Map<Object,Object> data) { state = new State(context); this.data = data; }
         public State state() { return state; }

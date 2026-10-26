@@ -31,3 +31,5 @@ attributes:
 java.util.List<Leaf> Graph.memo
 
 java.util.Map<Leaf, Leaf> References.bindings
+
+java.util.List<String> Leaf.notes

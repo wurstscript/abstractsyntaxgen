@@ -488,7 +488,7 @@ Each schema also generates `<typeprefix>NodeCodec` (or `NodeCodec` with no prefi
 `encode(node, encoder)` describes one node: constructors and persistent fields in `Data.fields`,
 list entries in `Data.items`. It calls `child` for owned children, `reference` for reference
 operands, and `attribute(field, value)` for other metadata. It does not walk children or
-references itself. Computed attribute caches, parents and modification counts are excluded;
+references itself. Explicit external reference parameters use `externalReference(field, value)`. Computed attribute caches, parents and modification counts are excluded;
 fields marked `@ignoreForEquality` are included.
 
 The client chooses an immutable value type `V`: for example owned node indices, symbolic external
@@ -577,3 +577,11 @@ admitted to the current and enclosing scopes. Close scopes in stack order on the
 The flag is static-final, so disabled guards can be removed by the JIT. Scopes are diagnostics,
 not synchronization or a sandbox for arbitrary Java callbacks; computed attribute evaluation keeps
 the concurrency contract described above.
+
+Reconstruction imports tracked containers for every node before resolving untracked metadata aliases,
+including aliases into a different node's tracked field. Sorted maps/sets are bulk-built from recorded
+order without invoking comparators on incomplete nodes; the complete private graph is checked for
+strict key ordering before it is returned. Identity-map keys keep distinct scalar identities even
+when ordinary scalar fields compare by value. Opaque external reference slots are neither traversed
+nor cloned by copy operations. An adapter's `compose` constructs value structure around reference
+leaves; it must not inspect a referenced node's unfinished body during reconstruction.

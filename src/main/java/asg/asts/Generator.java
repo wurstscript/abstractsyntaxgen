@@ -437,7 +437,7 @@ public class Generator {
         List<Parameter> params=c instanceof ConstructorDef constructor ? constructor.parameters : List.of();
         boolean referenceItems=c instanceof ListDef list && list.ref;
         List<Parameter> refs=params.stream().filter(p->p.isRef && prog.hasElement(p.getTyp())).toList();
-        List<Parameter> metadata=params.stream().filter(p->!prog.hasElement(p.getTyp()) && !JavaTypes.primitiveTypes.contains(p.getTyp()) && !p.getTyp().equals("String") && (prog.getMetadataAdapter()!=null || TypeUse.parse(p.getTyp()).containsNode(prog))).toList();
+        List<Parameter> metadata=params.stream().filter(p->!p.isRef && !prog.hasElement(p.getTyp()) && !JavaTypes.primitiveTypes.contains(p.getTyp()) && !p.getTyp().equals("String") && (prog.getMetadataAdapter()!=null || TypeUse.parse(p.getTyp()).containsNode(prog))).toList();
         List<FieldDef> fields=prog.fieldDefs.stream().filter(f->hasField(c,f) && !JavaTypes.primitiveTypes.contains(f.getFieldType()) && !f.getFieldType().equals("String") && (prog.getMetadataAdapter()!=null || TypeUse.parse(f.getFieldType()).containsNode(prog))).toList();
         if(!referenceItems && refs.isEmpty() && metadata.isEmpty() && fields.isEmpty()) return;
         String elementType=getCommonSupertypeType();
@@ -448,15 +448,21 @@ public class Generator {
         if(referenceItems) sb.append("        for(int i=0;i<size();i++) { var mapped=copies.get(get(i));if(mapped!=null) set(i,("+printType(((ListDef)c).itemType)+")mapped); }\n");
         if(trackedMetadata(c)) sb.append("        zzmetadataOwner.begin();\n        try {\n");
         for(Parameter p:refs) sb.append("        this."+p.name+" = ("+printType(p.getTyp())+")copies.getOrDefault(this."+p.name+", this."+p.name+");\n");
-        for(Parameter p:metadata) {
-            String value="("+printType(p.getTyp())+")mapper.map(this."+p.name+")";
-            if(p.isTracked()) sb.append("        zzAssign"+toFirstUpper(p.name)+"("+value+");\n");
-            else sb.append("        this."+p.name+" = "+value+";\n");
-        }
-        for(FieldDef f:fields) {
-            String value="("+printType(f.getFieldType())+")mapper.map(this."+f.getFieldName()+")";
-            if(f.isTracked()) sb.append("        zzAssign"+toFirstUpper(f.getFieldName())+"("+value+");\n");
-            else sb.append("        this."+f.getFieldName()+" = "+value+";\n");
+        for(boolean tracked:List.of(true,false)) {
+            for(Parameter p:metadata) if(p.isTracked()==tracked) {
+                String mapped="mapper.map(this."+p.name+")";
+                if(!tracked && trackedMetadata(c)) mapped="zzmetadataOwner.alias("+mapped+")";
+                String value="("+printType(p.getTyp())+")"+mapped;
+                if(tracked) sb.append("        zzAssign"+toFirstUpper(p.name)+"("+value+");\n");
+                else sb.append("        this."+p.name+" = "+value+";\n");
+            }
+            for(FieldDef f:fields) if(f.isTracked()==tracked) {
+                String mapped="mapper.map(this."+f.getFieldName()+")";
+                if(!tracked && trackedMetadata(c)) mapped="zzmetadataOwner.alias("+mapped+")";
+                String value="("+printType(f.getFieldType())+")"+mapped;
+                if(tracked) sb.append("        zzAssign"+toFirstUpper(f.getFieldName())+"("+value+");\n");
+                else sb.append("        this."+f.getFieldName()+" = "+value+";\n");
+            }
         }
         if(trackedMetadata(c)) sb.append("        } finally { zzmetadataOwner.end(); }\n");
         sb.append("    }\n\n");
@@ -523,7 +529,7 @@ public class Generator {
 
     private void createFieldsImpl(AstBaseTypeDefinition c, StringBuilder sb) {
         if (trackedMetadata(c)) {
-            sb.append("    @Override public void zzBeginMetadata() { "+typePrefix+"NodeOwnership.before(this);zzmetadataOwner.begin(); }\n    @Override public void zzEndMetadata() { zzmetadataOwner.end(); }\n");
+            sb.append("    @Override public void zzBeginMetadata() { "+typePrefix+"NodeOwnership.before(this);zzmetadataOwner.begin(); }\n    @Override public void zzBeginMetadata(java.util.IdentityHashMap<Object,Object> aliases) { "+typePrefix+"NodeOwnership.before(this);zzmetadataOwner.begin(aliases); }\n    @Override public Object zzMetadataAlias(Object value) { return zzmetadataOwner.alias(value); }\n    @Override public void zzEndMetadata() { zzmetadataOwner.end(); }\n");
             sb.append("    private final ").append(typePrefix).append("TrackedMetadata.Owner zzmetadataOwner = new ")
                 .append(typePrefix).append("TrackedMetadata.Owner(() -> "+typePrefix+"NodeOwnership.before(this), mask -> { ").append(countsModifications() ? getTreeUtilType() + ".modified(this, mask);" : "").append(" });\n");
         }
@@ -750,26 +756,29 @@ public class Generator {
     }
 
     private void createShallowCopyMethod(ConstructorDef c, StringBuilder sb) {
-        String implType = c.getName(typePrefix) + "Impl";
-        sb.append("    @Override public ").append(implType).append(" zzShallowCopy() {\n");
-        sb.append("        ").append(implType).append(" result = new ").append(implType).append("();\n");
-        if (trackedMetadata(c)) sb.append("        result.zzmetadataOwner.begin();\n        try {\n");
-        for (Parameter p : c.parameters) {
-            if (p.isRef || !prog.hasElement(p.getTyp())) {
-                if (p.isTracked()) sb.append("        result.zzAssign").append(toFirstUpper(p.name)).append("(this.").append(p.name).append(");\n");
-                else sb.append("        result.").append(p.name).append(" = this.").append(p.name).append(";\n");
+        String implType=c.getName(typePrefix)+"Impl";
+        sb.append("    @Override public "+implType+" zzShallowCopy() {\n        "+implType+" result=new "+implType+"();\n");
+        if(trackedMetadata(c)) sb.append("        result.zzmetadataOwner.begin();\n        try {\n");
+        for(boolean tracked:List.of(true,false)) {
+            for(Parameter p:c.parameters) if(p.isTracked()==tracked && (p.isRef || !prog.hasElement(p.getTyp()))) {
+                if(tracked) sb.append("        result.zzAssign"+toFirstUpper(p.name)+"(this."+p.name+");\n");
+                else {
+                    String value="this."+p.name;
+                    if(trackedMetadata(c) && !p.isRef) value="("+printType(p.getTyp())+")result.zzmetadataOwner.alias("+value+")";
+                    sb.append("        result."+p.name+" = "+value+";\n");
+                }
+            }
+            for(FieldDef f:prog.fieldDefs) if(hasField(c,f) && f.isTracked()==tracked) {
+                if(tracked) sb.append("        result.zzAssign"+toFirstUpper(f.getFieldName())+"(this."+f.getFieldName()+");\n");
+                else {
+                    String value="this."+f.getFieldName();
+                    if(trackedMetadata(c)) value="("+printType(f.getFieldType())+")result.zzmetadataOwner.alias("+value+")";
+                    sb.append("        result."+f.getFieldName()+" = "+value+";\n");
+                }
             }
         }
-        for (FieldDef field : prog.fieldDefs) {
-            if (hasField(c, field)) {
-                // not through the setter, which counts a modification: a copy has had none
-                if (field.isTracked()) sb.append("        result.zzAssign").append(toFirstUpper(field.getFieldName())).append("(this.").append(field.getFieldName()).append(");\n");
-                else sb.append("        result.").append(field.getFieldName()).append(" = this.").append(field.getFieldName()).append(";\n");
-            }
-        }
-        if (trackedMetadata(c)) sb.append("        } finally { result.zzmetadataOwner.end(); }\n");
-        sb.append("        return result;\n");
-        sb.append("    }\n\n");
+        if(trackedMetadata(c)) sb.append("        } finally { result.zzmetadataOwner.end(); }\n");
+        sb.append("        return result;\n    }\n\n");
     }
 
     private String printType(String typ) {
@@ -1599,7 +1608,8 @@ public class Generator {
                 .append("    default void trimToSize() { for (int i = 0, n = size(); i < n; i++) get(i).trimToSize(); }\n")
                 .append("    default boolean zzReferenceItems() { return false; }\n")
                 .append("    default void zzResetRevisions() {}\n")
-                .append("    default void zzBeginMetadata() {}\n    default void zzEndMetadata() {}\n")
+                .append("    default void zzBeginMetadata() {}\n    default void zzBeginMetadata(java.util.IdentityHashMap<Object,Object> aliases) {}\n    default void zzEndMetadata() {}\n")
+                .append("    default Object zzMetadataAlias(Object value) { return value; }\n")
                 .append("    default boolean zzSourceChild(" + getCommonSupertypeType() + " child) { return false; }\n")
                 .append("    void setParent(").append(getNullableAnnotation()).append(getCommonSupertypeType()).append(" parent);\n")
                 .append("    void replaceBy(").append(getCommonSupertypeType()).append(" other);\n")

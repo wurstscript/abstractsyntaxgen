@@ -9,11 +9,16 @@ Complete these generator-owned features before widening Wurst backend caching. K
 
 Exit gates: adversarial regression tests and planted mutants, all generator tests on Java25/27, deterministic output, all real Wurst schemas generate and compile, and independent Wurst fresh-build oracles. Preserve emitted-program semantics; compiler dependency facts and compile-time execution remain compiler-owned. Do not claim a hot-reload latency improvement until a backend consumer proves bounded work on real edits.
 
-Implementation status: all four generator contracts are implemented on this branch. Validation includes
-schema-role determinism, deep graph/container round trips, reference-list and nested-reference repair,
-source-domain aliasing, failed attachment atomicity and foreign-write guards. All four real Wurst schemas generate and compile, and 96 focused scalar-backend, retained/fresh
-compilation and determinism tests pass against the local generator. Four planted faults (source-domain
+Implementation status: all four contracts are implemented. Regression coverage includes schema-role
+determinism, deep graph/container round trips, reference-list and nested-reference repair, source-domain
+aliasing, failed attachment atomicity and foreign-write guards. Four planted faults (source-domain
 notification, nested-reference remapping, foreign-write checks and detached-view lifetime) each fail
-their behavioral regression; the restored implementation passes. Current-head CI/review clearance
-and the final real-map replay remain exit gates. Backend dependency meaning, reachability,
-compile-time effects and specialization identities remain compiler responsibilities.
+their behavioral regression; the restored implementation passes. All four real Wurst schemas generate
+and compile, with 96 focused incremental-backend, fresh-build and determinism oracles as the consumer
+integration gate. Real-map replay validates independent Lua and manifest equality; acceptance warnings
+and backend work counts must still be reported separately from correctness.
+
+Compiler adoption remains compiler-owned: dependency meaning, reachability, compile-time effects,
+specialization identities, symbol keys and custom value adapters. These are not missing generator
+field traversal or ownership features. Do not claim a latency gain before affected-function work is
+measured in the backend consumer.

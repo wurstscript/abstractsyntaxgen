@@ -71,6 +71,59 @@ class GraphContractsTest {
         OMNodeGraphs.referenceSlots(external,(field,value)->{fields.add(field);values.add(value);},OMNodeGraphs.Adapter.DEFAULT);
         assertEquals(List.of("OMExternal.externalTarget"),fields);assertSame(target,values.get(0));
     }
+    @Test void repeatedReferenceSlotsAreVisitedEvenWhenTheyHaveTheSameTarget() {
+        var leaf=OM.Leaf(new ArrayList<>());var owner=OM.ReferenceOwner(new ArrayList<>(List.of(leaf,leaf)));
+        List<OMElement> slots=new ArrayList<>();OMNodeGraphs.references(owner,slots::add);
+        assertEquals(List.of(leaf,leaf),slots);
+    }
+    @Test void opaqueExternalReferencesAreNeitherClonedNorTraversedByCopies() {
+        var cyclic=new ArrayList<Object>();cyclic.add(cyclic);var observer=OM.External(cyclic);
+        assertSame(cyclic,observer.copyWithRefs().getExternalTarget());
+        assertSame(cyclic,((OMExternal)OMNodeGraphs.copy(observer,CHOICE)).getExternalTarget());
+    }
+    @Test void trackedAndUntrackedAliasesSurvivePrivateReconstruction() {
+        var graph=graph();graph.setMemo(graph.getLinks().get(graph.getNodes().get(0)));
+        var frozen=OMNodeGraphs.freeze(graph,CHOICE);
+        for(var copy:List.of((OMGraph)frozen.materialize(CHOICE),(OMGraph)OMNodeGraphs.copy(graph,CHOICE),graph.copyWithRefs())) {
+            assertSame(copy.getMemo(),copy.getLinks().get(copy.getNodes().get(0)));
+            assertEquals(frozen,OMNodeGraphs.freeze(copy,CHOICE));
+            copy.getMemo().clear();assertTrue(copy.getLinks().get(copy.getNodes().get(0)).isEmpty());
+        }
+    }
+    @Test void identityMapsRetainDistinctEqualScalarKeys() {
+        var map=new IdentityHashMap<Object,Object>();map.put(new String("same"),"one");map.put(new String("same"),"two");
+        var root=OM.Raw(new ArrayList<>(List.of(map)));var frozen=OMNodeGraphs.freeze(root);
+        var restored=(OMRaw)frozen.materialize();var actual=(Map<?,?>)restored.getValues().get(0);
+        assertEquals(2,actual.size());assertEquals(Set.of("one","two"),new HashSet<>(actual.values()));
+        assertEquals(frozen,OMNodeGraphs.freeze(restored));
+    }
+    @Test void sortedNodeKeysAreRestoredWithoutObservingUnpopulatedNodes() {
+        Comparator<OMLeaf> comparator=Comparator.comparing(leaf->leaf.getData().get(0));
+        var a=OM.Leaf(new ArrayList<>(List.of("a")));var b=OM.Leaf(new ArrayList<>(List.of("b")));
+        var links=new TreeMap<OMLeaf,List<OMLeaf>>(comparator);links.put(a,new ArrayList<>(List.of(b)));links.put(b,new ArrayList<>(List.of(a)));
+        var graph=OM.Graph(OM.Nodes(a,b),links,new Choice(true,a));
+        var sorted=new TreeSet<OMLeaf>(comparator);sorted.add(a);sorted.add(b);graph.setVariant(sorted);
+        var adapter=new OMNodeGraphs.Adapter() {
+            public OMNodeGraphs.Parts decompose(Object value) { return CHOICE.decompose(value); }
+            public Object compose(String tag,List<Object> values) { return CHOICE.compose(tag,values); }
+            public OMNodeGraphs.Symbol symbol(String field,Object value) { assertSame(comparator,value);return new OMNodeGraphs.Symbol("comparator","leaf-name"); }
+            public Object resolve(OMNodeGraphs.Symbol symbol) { return comparator; }
+        };
+        var copy=(OMGraph)OMNodeGraphs.freeze(graph,adapter).materialize(adapter);
+        assertEquals(List.of(copy.getNodes().get(0),copy.getNodes().get(1)),new ArrayList<>(copy.getLinks().keySet()));
+        assertSame(copy.getNodes().get(1),copy.getLinks().get(copy.getNodes().get(0)).get(0));
+        assertEquals(List.of(copy.getNodes().get(0),copy.getNodes().get(1)),new ArrayList<>((Set<?>)copy.getVariant()));
+    }
+    @Test void aliasesFromOtherNodesResolveAfterEveryTrackedOwnerHasImportedItsContainers() {
+        var graph=graph();graph.getNodes().get(0).setNotes(graph.getNodes().get(1).getData());
+        var frozen=OMNodeGraphs.freeze(graph,CHOICE);
+        for(var copy:List.of((OMGraph)frozen.materialize(CHOICE),(OMGraph)OMNodeGraphs.copy(graph,CHOICE))) {
+            assertSame(copy.getNodes().get(1).getData(),copy.getNodes().get(0).getNotes());
+            assertEquals(frozen,OMNodeGraphs.freeze(copy,CHOICE));
+            int before=copy.getNodes().get(1).modificationCount();copy.getNodes().get(0).getNotes().add("alias");
+            assertNotEquals(before,copy.getNodes().get(1).modificationCount());
+        }
+    }
     @Test void nestedReferencesAreVisitedWithoutFollowingTheirTargets() {
         var graph=graph();List<OMElement> references=new ArrayList<>();
         OMNodeGraphs.references(graph,references::add,CHOICE);
