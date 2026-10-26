@@ -279,6 +279,10 @@ final class __PREFIX__TrackedMetadata {
         }
         public int size() { return data.size(); }
         public boolean contains(Object value) { return data.contains(value); }
+        public boolean remove(Object value) {
+            if(!data.contains(value)) return false;
+            state.before();boolean removed=data.remove(value);if(removed) state.changed();return removed;
+        }
         public boolean add(Object value) {
             key(value); if (data.contains(value)) return false;
             state.before(); boolean added = data.add(value); if (added) state.changed(); return added;
@@ -308,6 +312,76 @@ final class __PREFIX__TrackedMetadata {
         }
         public int size() { return data.size(); }
         public boolean containsKey(Object key) { return data.containsKey(key); }
+        public boolean containsValue(Object value) { return data.containsValue(value); }
+        @Override public boolean equals(Object other) { return other==this || data.equals(other); }
+        @Override public int hashCode() { return data.hashCode(); }
+        public boolean remove(Object key,Object value) {
+            if(!data.entrySet().contains(new AbstractMap.SimpleImmutableEntry<>(key,value))) return false;
+            remove(key);return true;
+        }
+        public boolean replace(Object key,Object previous,Object next) {
+            if(!data.entrySet().contains(new AbstractMap.SimpleImmutableEntry<>(key,previous))) return false;
+            put(key,next);return true;
+        }
+        private boolean bulk(BooleanSupplier change) {
+            if(data.isEmpty()) return false;
+            List<Object> old=new ArrayList<>(data.values());int previousSize=data.size();state.before();
+            try { return change.getAsBoolean(); }
+            finally {
+                if(previousSize!=data.size()) {
+                    epoch++;
+                    for(Object value:old) state.context.replace(this,value,null);
+                    for(Object value:data.values()) state.context.replace(this,null,value);
+                    state.changed();
+                }
+            }
+        }
+        public Set<Object> keySet() {
+            return new AbstractSet<>() {
+                public int size() { return data.size(); }
+                public boolean contains(Object key) { return data.containsKey(key); }
+                public boolean remove(Object key) { if(!data.containsKey(key)) return false;MapBox.this.remove(key);return true; }
+                public void clear() { MapBox.this.clear(); }
+                public boolean removeAll(Collection<?> values) { return bulk(()->data.keySet().removeAll(values)); }
+                public boolean retainAll(Collection<?> values) { return bulk(()->data.keySet().retainAll(values)); }
+                public boolean equals(Object other) { return other==this || data.keySet().equals(other); }
+                public int hashCode() { return data.keySet().hashCode(); }
+                public Iterator<Object> iterator() {
+                    Iterator<Map.Entry<Object,Object>> entries=entrySet().iterator();
+                    return new Iterator<>() {
+                        public boolean hasNext() { return entries.hasNext(); }
+                        public Object next() { return entries.next().getKey(); }
+                        public void remove() { entries.remove(); }
+                    };
+                }
+            };
+        }
+        public Collection<Object> values() {
+            return new AbstractCollection<>() {
+                public int size() { return data.size(); }
+                public boolean contains(Object value) { return data.containsValue(value); }
+                public void clear() { MapBox.this.clear(); }
+                public boolean removeAll(Collection<?> values) { return bulk(()->data.values().removeAll(values)); }
+                public boolean retainAll(Collection<?> values) { return bulk(()->data.values().retainAll(values)); }
+                public boolean remove(Object value) {
+                    Iterator<Map.Entry<Object,Object>> entries=entrySet().iterator();
+                    while(entries.hasNext()) {
+                        Object stored=entries.next().getValue();
+                        if(data instanceof IdentityHashMap ? stored==value : Objects.equals(stored,value)) { entries.remove();return true; }
+                    }
+                    return false;
+                }
+                public Iterator<Object> iterator() {
+                    Iterator<Map.Entry<Object,Object>> entries=entrySet().iterator();
+                    return new Iterator<>() {
+                        public boolean hasNext() { return entries.hasNext(); }
+                        public Object next() { return entries.next().getValue(); }
+                        public void remove() { entries.remove(); }
+                    };
+                }
+            };
+        }
+
         public Object get(Object key) { return data.get(key); }
         private Object prepare(Object value, Copier copier) { Object next = copier.copy(value); cycle(this, next); return next; }
         private Object putPrepared(Object key, Object next) {
@@ -336,6 +410,16 @@ final class __PREFIX__TrackedMetadata {
         public Set<Map.Entry<Object,Object>> entrySet() {
             return new AbstractSet<>() {
                 public int size() { return data.size(); }
+                public boolean contains(Object entry) { return data.entrySet().contains(entry); }
+                public boolean remove(Object candidate) {
+                    if(!(candidate instanceof Map.Entry<?,?> entry) || !data.entrySet().contains(entry)) return false;
+                    MapBox.this.remove(entry.getKey());return true;
+                }
+                public boolean removeAll(Collection<?> values) { return bulk(()->data.entrySet().removeAll(values)); }
+                public boolean retainAll(Collection<?> values) { return bulk(()->data.entrySet().retainAll(values)); }
+                public boolean equals(Object other) { return other==this || data.entrySet().equals(other); }
+                public int hashCode() { return data.entrySet().hashCode(); }
+
                 public void clear() { MapBox.this.clear(); }
                 public Iterator<Map.Entry<Object,Object>> iterator() {
                     Iterator<Map.Entry<Object,Object>> iterator = data.entrySet().iterator();
@@ -354,9 +438,9 @@ final class __PREFIX__TrackedMetadata {
                                     state.before(); entry.setValue(next); state.context.replace(MapBox.this, old, next); state.changed(); return old;
                                 }
                                 public boolean equals(Object other) {
-                                    return other instanceof Map.Entry<?,?> e && Objects.equals(getKey(),e.getKey()) && Objects.equals(getValue(),e.getValue());
+                                    return entry.equals(other);
                                 }
-                                public int hashCode() { return Objects.hashCode(getKey()) ^ Objects.hashCode(getValue()); }
+                                public int hashCode() { return entry.hashCode(); }
                             };
                         }
                         public void remove() {

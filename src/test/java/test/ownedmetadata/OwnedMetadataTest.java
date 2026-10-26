@@ -200,6 +200,38 @@ class OwnedMetadataTest {
         var copy=node.copyWithRefs();
         assertEquals(0,copy.modificationCount());assertEquals(0,copy.semanticModificationCount());assertEquals(0,copy.sourceModificationCount());
     }
+    @Test void identityMapViewsUseBackingKeyAndValueIdentity() {
+        String key=new String("same"),equalKey=new String("same");
+        var incoming=new IdentityHashMap<String,List<String>>();incoming.put(key,new ArrayList<>(List.of("value")));
+        var root=OM.Root(new ArrayList<>(),incoming,new LinkedHashSet<>());var map=root.getGroups();var value=map.get(key);
+        int before=root.modificationCount();
+        assertFalse(map.keySet().remove(equalKey));assertTrue(map.containsKey(key));
+        assertFalse(map.entrySet().contains(new AbstractMap.SimpleEntry<>(equalKey,value)));
+        assertFalse(map.entrySet().remove(new AbstractMap.SimpleEntry<>(equalKey,value)));
+        assertFalse(map.containsValue(new ArrayList<>(value)));
+        assertFalse(map.values().remove(new ArrayList<>(value)));
+        assertFalse(map.entrySet().iterator().next().equals(new AbstractMap.SimpleEntry<>(equalKey,value)));
+        assertFalse(map.remove(key,new ArrayList<>(value)));
+        assertFalse(map.replace(key,new ArrayList<>(value),new ArrayList<>()));
+        assertEquals(before,root.modificationCount());
+        changes(root,()->map.keySet().remove(key));assertTrue(map.isEmpty());
+    }
+    @Test void identityMapBulkViewsRetainAliasesUntilTheirLastBindingIsRemoved() {
+        String first=new String("same"),second=new String("same");var shared=new ArrayList<>(List.of("value"));
+        var input=new IdentityHashMap<String,List<String>>();input.put(first,shared);input.put(second,shared);
+        var root=OM.Root(new ArrayList<>(),input,new LinkedHashSet<>());var alias=root.getGroups().get(first);
+        Set<String> removed=Collections.newSetFromMap(new IdentityHashMap<>());removed.add(first);
+        changes(root,()->root.getGroups().keySet().removeAll(removed));assertEquals(1,root.getGroups().size());
+        changes(root,()->alias.add("retained"));
+        changes(root,()->root.getGroups().entrySet().retainAll(Set.of()));assertTrue(root.getGroups().isEmpty());
+        int before=root.modificationCount();alias.add("detached");assertEquals(before,root.modificationCount());
+    }
+    @Test void trackedSortedSetRemovalUsesItsComparator() {
+        var tags=new TreeSet<String>(String.CASE_INSENSITIVE_ORDER);tags.add("a");
+        var root=OM.Root(new ArrayList<>(),new LinkedHashMap<>(),tags);
+        assertTrue(root.getTags().contains("A"));
+        changes(root,()->assertTrue(root.getTags().remove("A")));assertTrue(root.getTags().isEmpty());
+    }
     @Test void cyclicContainersFailBeforeTheyCanChangeTheOwner() {
         var cyclic = new ArrayList<Object>(); cyclic.add(cyclic);
         assertThrows(IllegalArgumentException.class, () -> OM.Raw(cyclic));
