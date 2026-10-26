@@ -488,7 +488,7 @@ Each schema also generates `<typeprefix>NodeCodec` (or `NodeCodec` with no prefi
 `encode(node, encoder)` describes one node: constructors and persistent fields in `Data.fields`,
 list entries in `Data.items`. It calls `child` for owned children, `reference` for reference
 operands, and `attribute(field, value)` for other metadata. It does not walk children or
-references itself. Computed attribute caches, parents and modification counts are excluded;
+references itself. Explicit external reference parameters use `externalReference(field, value)`. Computed attribute caches, parents and modification counts are excluded;
 fields marked `@ignoreForEquality` are included.
 
 The client chooses an immutable value type `V`: for example owned node indices, symbolic external
@@ -501,3 +501,107 @@ tags, not semantic identities or a stable disk format.
 children, resolves symbolic references in its compilation context, and restores mutable metadata
 into request-owned copies. It must resolve declarations and cycles before exposing a graph to a
 compiler pass. The codec never follows an external target or supplies a placeholder function body.
+
+## Owned metadata and source revisions
+
+`@tracked` opts a constructor parameter or persistent field into owned `List<T>`, `Set<T>`,
+`Collection<T>` (list/set inputs), or `Map<K,V>` metadata. The generator copies container structure,
+including nested containers, and preserves aliases within one node. Incoming containers and copied
+nodes cannot mutate the original owner. Mutating iterators, sublists, map entries, key/value views,
+bulk operations and `compute`/`merge` notify the owner. Removed views stop notifying after their last
+owned edge disappears. Container cycles, mutable container keys/set members and arrays are diagnosed.
+Leaves must be immutable values or node references: changing a referenced node never dirties the
+observer. Unknown mutable leaf types need an explicit domain representation; `@tracked` cannot
+intercept arbitrary methods on an opaque Java object. Sorted comparators and identity-map key
+semantics are preserved. Existing unannotated metadata keeps its previous ownership contract.
+
+With `modification counts`, `@source` marks a field as source information. Counted constructors expose
+`modificationCount()`, `semanticModificationCount()` and `sourceModificationCount()`. Total revisions
+still see every edit. A source-owned edge converts all descendant changes into source changes at
+that boundary. Metadata shared by source and semantic fields updates both domains until the relevant
+edge is removed. Copies and materialized snapshots start with zero revisions. Schemas without
+`@source` retain one counter per counted node; the semantic getter aliases the total and source is zero.
+`@source` does not change the legacy `structuralEquals` contract.
+
+## Complete graph operations
+
+Every schema generates `<prefix>NodeGraphs`:
+
+```java
+var frozen = ImNodeGraphs.freeze(function, adapter);
+ImFunction privateInput = (ImFunction) frozen.materialize(adapter);
+ImNodeGraphs.references(privateInput, references::add, adapter);
+try (var scope = ImNodeOwnership.scope(privateInput)) {
+    // Lower only this private graph; references into other graphs are read-only.
+}
+```
+
+`freeze` discovers only owned children, then encodes all fields and metadata. The snapshot retains
+immutable scalar values, flat container records, internal node indices and external `Symbol` strings;
+it retains no mutable node, callback or adapter. It handles deep graphs iteratively. Internal
+self-references and mutual references materialize through package-private allocation/population,
+then ownership validation and revision reset. No partially constructed header is returned to a pass.
+Each snapshot carries a generated SHA-256 schema identity covering field order, types, ownership,
+source roles and case membership. It is an in-memory boundary, not a supported disk format.
+
+Snapshots compare by graph content; `sameSemantics` excludes source fields and their otherwise
+unreachable owned nodes. Reference identities and metadata aliases remain significant. Comparisons
+are independent of incidental scalar object sharing and node numbering. `NodeGraphs.validate(root)`
+checks unique, acyclic ownership and matching parent links without visiting reference targets.
+`NodeGraphs.copy(root, adapter)` makes a mutable private copy, repairing references in nested map
+keys, values, lists, sets, optionals and custom sums. Colliding remapped keys/members fail explicitly.
+Legacy `copyWithRefs` also repairs standard metadata and preserves reference-list targets.
+
+`Adapter.decompose`/`compose` describe a **type**, such as `Either`, rather than listing individual
+schema fields. `Parts` are traversed recursively. `symbol`/`resolve` handle domain values and external
+references through stable `(namespace, key)` pairs. Repeated symbols resolve once per materialization;
+use distinct keys when mutable identities must remain distinct. Unknown snapshot leaves fail with
+field/type context. Custom comparators and empty `EnumMap` key types need adapters. An adapter may
+override standard Java containers when their concrete type matters.
+
+A schema can declare its adapter after the modification-count header:
+
+```text
+metadata adapter: example.ImMetadataAdapter
+```
+
+The class implements that schema's generated `NodeGraphs.Adapter` and has a public no-argument
+constructor. Generated graph operations and legacy reference repair use it by default; explicit
+adapters can still be passed per operation. This keeps field coverage in the generator and domain
+value semantics in the consumer. Computed attributes are never serialized or copied as results.
+
+For debug phase checks, start the JVM with `-Dasg.checkOwnership=true` and open a
+`NodeOwnership.scope(root)`. Semantic setters, parent changes, list mutations and tracked metadata
+views reject writes outside that ownership set before changing data. Newly constructed nodes are
+admitted to the current and enclosing scopes. Close scopes in stack order on the opening thread.
+The flag is static-final, so disabled guards can be removed by the JIT. Scopes are diagnostics,
+not synchronization or a sandbox for arbitrary Java callbacks; computed attribute evaluation keeps
+the concurrency contract described above.
+
+Reconstruction imports tracked containers for every node before resolving untracked metadata aliases,
+including aliases into a different node's tracked field. Sorted maps/sets are bulk-built from recorded
+order without invoking comparators on incomplete nodes; the complete private graph is checked for
+strict key ordering before it is returned. Identity-map keys keep distinct scalar identities even
+when ordinary scalar fields compare by value. Opaque external reference slots are neither traversed
+nor cloned by copy operations. An adapter's `compose` constructs value structure around reference
+leaves; it must not inspect a referenced node's unfinished body during reconstruction.
+
+Snapshot comparison pairs internal nodes by generated ownership slots before comparing reference
+metadata. Identity-map bindings are unordered; object hash-table iteration never chooses node identity
+or comparison order. Scalar keys in identity maps retain their immutable object identities, and other
+external/custom identity keys require stable symbols. Container aliases are compared bijectively,
+so equal contents in two independent mutable containers do not become one shared container.
+
+`Adapter.mapKind` and `setKind` declare collection comparison semantics when a library interface does
+not describe its ordering. For example, a library may expose an insertion-ordered map as `SortedMap`
+while returning a null comparator and accepting non-comparable keys. Declare `MapKind.EQUALITY` for
+that type; generated copy, tracking and snapshot operations preserve its iteration order in a standard
+owned map. `MapKind.IDENTITY` and `SORTED` preserve identity lookup and comparator order respectively.
+This is a type policy, never a per-field copy list, and adds no library dependency to the generator.
+Opaque values with no structural references do not allocate a reference-repair context.
+
+`Adapter.externalReference` identifies nodes from another generated schema or another external graph.
+Such nodes remain reference leaves even if their Java class also implements `List`, `Set` or `Map`.
+They are never converted to metadata containers or traversed as collections. The generated schema's
+own nodes are recognized automatically, including list nodes. Snapshot encoding uses symbolic keys
+for foreign references; the caller resolves them in its compilation context.
