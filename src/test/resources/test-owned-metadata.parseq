@@ -1,10 +1,11 @@
 package test.ownedmetadata
 
 typeprefix: OM
-modification counts: Root, Raw, Outer, ReferenceOwner, Revisions, Leaf, SourceLists
+modification counts: Root, Raw, Outer, ReferenceOwner, Revisions, Leaf, SourceLists, SourceIdentity
 
 metadata adapter: test.ownedmetadata.SchemaMetadataAdapter
 abstract syntax:
+SourceIdentity(String caption, @source @tracked java.util.Map<String,String> originKeys)
 SourceLists(Nodes nodes, @source Nodes originNodes)
 WithRefs(Nodes nodes, References references)
 Graph(Nodes nodes, @tracked java.util.Map<Leaf, java.util.List<Leaf>> links, Object variant)
@@ -33,3 +34,6 @@ java.util.List<Leaf> Graph.memo
 java.util.Map<Leaf, Leaf> References.bindings
 
 java.util.List<String> Leaf.notes
+
+@tracked java.util.List<String> Nodes.data
+java.util.List<String> Nodes.memo

@@ -768,14 +768,7 @@ public class Generator {
                     sb.append("        result."+p.name+" = "+value+";\n");
                 }
             }
-            for(FieldDef f:prog.fieldDefs) if(hasField(c,f) && f.isTracked()==tracked) {
-                if(tracked) sb.append("        result.zzAssign"+toFirstUpper(f.getFieldName())+"(this."+f.getFieldName()+");\n");
-                else {
-                    String value="this."+f.getFieldName();
-                    if(trackedMetadata(c)) value="("+printType(f.getFieldType())+")result.zzmetadataOwner.alias("+value+")";
-                    sb.append("        result."+f.getFieldName()+" = "+value+";\n");
-                }
-            }
+            copyPersistentFields(c,tracked,sb);
         }
         if(trackedMetadata(c)) sb.append("        } finally { result.zzmetadataOwner.end(); }\n");
         sb.append("        return result;\n    }\n\n");
@@ -1538,24 +1531,27 @@ public class Generator {
     }
 
     private void createShallowCopyMethod(ListDef l, StringBuilder sb) {
-        String implType = l.getName(typePrefix) + "Impl";
-        sb.append("    @Override public ").append(implType).append(" zzShallowCopy() {\n");
-        sb.append("        ").append(implType).append(" result = new ").append(implType).append("();\n");
+        String implType=l.getName(typePrefix)+"Impl";
+        sb.append("    @Override public "+implType+" zzShallowCopy() {\n        "+implType+" result=new "+implType+"();\n");
         sb.append("        result.ensureCapacity(size());\n");
         if(l.ref) sb.append("        result.addAll(this);\n");
-        if (trackedMetadata(l)) sb.append("        result.zzmetadataOwner.begin();\n        try {\n");
-        for (FieldDef field : prog.fieldDefs) {
-            if (hasField(l, field)) {
-                // not through the setter, which counts a modification: a copy has had none
-                if (field.isTracked()) sb.append("        result.zzAssign").append(toFirstUpper(field.getFieldName())).append("(this.").append(field.getFieldName()).append(");\n");
-                else sb.append("        result.").append(field.getFieldName()).append(" = this.").append(field.getFieldName()).append(";\n");
-            }
-        }
-        if (trackedMetadata(l)) sb.append("        } finally { result.zzmetadataOwner.end(); }\n");
-        sb.append("        return result;\n");
-        sb.append("    }\n\n");
+        if(trackedMetadata(l)) sb.append("        result.zzmetadataOwner.begin();\n        try {\n");
+        for(boolean tracked:List.of(true,false)) copyPersistentFields(l,tracked,sb);
+        if(trackedMetadata(l)) sb.append("        } finally { result.zzmetadataOwner.end(); }\n");
+        sb.append("        return result;\n    }\n\n");
     }
 
+    /** Constructors and list nodes use one import policy for persistent metadata. */
+    private void copyPersistentFields(AstBaseTypeDefinition definition,boolean tracked,StringBuilder sb) {
+        for(FieldDef field:prog.fieldDefs) if(hasField(definition,field) && field.isTracked()==tracked) {
+            if(tracked) sb.append("        result.zzAssign"+toFirstUpper(field.getFieldName())+"(this."+field.getFieldName()+");\n");
+            else {
+                String value="this."+field.getFieldName();
+                if(trackedMetadata(definition)) value="("+printType(field.getFieldType())+")result.zzmetadataOwner.alias("+value+")";
+                sb.append("        result."+field.getFieldName()+" = "+value+";\n");
+            }
+        }
+    }
 
     private void addSuppressWarningAnnotations(StringBuilder sb) {
         sb.append("@SuppressWarnings({\"cast\", \"unused\", \"rawtypes\"})\n");

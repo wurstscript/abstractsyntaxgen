@@ -1,0 +1,8 @@
+package test.listmetadata
+typeprefix: LM
+abstract syntax:
+Entries * Entry
+Entry()
+attributes:
+@tracked java.util.List<String> Entries.values
+java.util.List<String> Entries.alias

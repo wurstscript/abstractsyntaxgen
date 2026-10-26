@@ -142,6 +142,19 @@ class GraphContractsTest {
         var aliased=OMNodeGraphs.freeze(first);var separate=OMNodeGraphs.freeze(second);
         assertNotEquals(aliased,separate);assertFalse(aliased.sameSemantics(separate));
     }
+    @Test void sourceIdentityMapsCannotMakeUnchangedSemanticScalarsIdentitySensitive() {
+        String caption=new String("unchanged");var source=new IdentityHashMap<String,String>();source.put(caption,"location");
+        var root=OM.SourceIdentity(caption,source);var before=OMNodeGraphs.freeze(root);int semantic=root.semanticModificationCount();
+        root.setOriginKeys(new IdentityHashMap<>());var after=OMNodeGraphs.freeze(root);
+        assertEquals(semantic,root.semanticModificationCount());assertTrue(before.sameSemantics(after));assertNotEquals(before,after);
+    }
+    @Test void listNodeCopiesRemapUntrackedAliasesToTheirCopiedTrackedMetadata() {
+        var list=OM.Nodes();list.setData(new ArrayList<>(List.of("source")));list.setMemo(list.getData());
+        for(var copy:List.of(list.copy(),list.copyWithRefs())) {
+            assertSame(copy.getData(),copy.getMemo());assertNotSame(list.getData(),copy.getMemo());
+            copy.getMemo().add("copy");assertEquals(List.of("source"),list.getData());
+        }
+    }
     @Test void nestedReferencesAreVisitedWithoutFollowingTheirTargets() {
         var graph=graph();List<OMElement> references=new ArrayList<>();
         OMNodeGraphs.references(graph,references::add,CHOICE);

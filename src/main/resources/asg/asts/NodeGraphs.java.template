@@ -247,9 +247,23 @@ public final class __PREFIX__NodeGraphs {
             }
             return new int[][] {forward,reverse};
         }
-        private boolean[] identityKeys() {
-            boolean[] keys=new boolean[values.size()];
-            for(Value value:values) if(value.kind().equals("identity-map")) for(int i=0;i<value.links().size();i+=2) keys[value.links().get(i)]=true;
+        private boolean[] identityKeys(boolean semantics) {
+            boolean[] keys=new boolean[values.size()],seenValues=new boolean[values.size()],seenNodes=new boolean[nodes.size()];
+            ArrayDeque<Integer> pendingNodes=new ArrayDeque<>(),pendingValues=new ArrayDeque<>();pendingNodes.add(0);
+            while(!pendingNodes.isEmpty() || !pendingValues.isEmpty()) {
+                while(!pendingNodes.isEmpty()) {
+                    int id=pendingNodes.remove();if(seenNodes[id]) continue;seenNodes[id]=true;var node=nodes.get(id);
+                    Set<Integer> source=semantics ? __PREFIX__NodeCodec.sourceFields(node.kind()) : Set.of();
+                    for(int i=0;i<node.fields().size();i++) if(!source.contains(i)) pendingValues.add(node.fields().get(i));
+                    pendingValues.addAll(node.items());
+                }
+                while(!pendingValues.isEmpty()) {
+                    int id=pendingValues.remove();if(seenValues[id]) continue;seenValues[id]=true;Value value=values.get(id);
+                    if(value.kind().equals("identity-map")) for(int i=0;i<value.links().size();i+=2) keys[value.links().get(i)]=true;
+                    if(value.kind().equals("node")) pendingNodes.add((Integer)value.atom());
+                    pendingValues.addAll(value.links());
+                }
+            }
             return keys;
         }
         private Object identityKey(int id,int[] mapping) {
@@ -264,7 +278,7 @@ public final class __PREFIX__NodeGraphs {
         private boolean equivalent(Snapshot other,boolean semantics) {
             if(!schema.equals(other.schema)) return false;
             int[][] owned=pairedOwnership(other);int[] forward=unmatched(values.size()),reverse=unmatched(other.values.size());
-            boolean[] leftKeys=identityKeys(),rightKeys=other.identityKeys();
+            boolean[] leftKeys=identityKeys(semantics),rightKeys=other.identityKeys(semantics);
             Set<Pair> visitedNodes=new HashSet<>();ArrayDeque<Pair> nodePairs=new ArrayDeque<>(),valuePairs=new ArrayDeque<>();nodePairs.add(new Pair(0,0));
             while(!nodePairs.isEmpty() || !valuePairs.isEmpty()) {
                 while(!nodePairs.isEmpty()) {
