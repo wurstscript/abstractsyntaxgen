@@ -437,8 +437,14 @@ public class Generator {
         List<Parameter> params=c instanceof ConstructorDef constructor ? constructor.parameters : List.of();
         boolean referenceItems=c instanceof ListDef list && list.ref;
         List<Parameter> refs=params.stream().filter(p->p.isRef && prog.hasElement(p.getTyp())).toList();
-        List<Parameter> metadata=params.stream().filter(p->!p.isRef && !prog.hasElement(p.getTyp()) && !JavaTypes.primitiveTypes.contains(p.getTyp()) && !p.getTyp().equals("String") && (prog.getMetadataAdapter()!=null || TypeUse.parse(p.getTyp()).containsNode(prog))).toList();
-        List<FieldDef> fields=prog.fieldDefs.stream().filter(f->hasField(c,f) && !JavaTypes.primitiveTypes.contains(f.getFieldType()) && !f.getFieldType().equals("String") && (prog.getMetadataAdapter()!=null || TypeUse.parse(f.getFieldType()).containsNode(prog))).toList();
+        List<Parameter> metadata=params.stream().filter(this::metadataForRepair).toList();
+        List<FieldDef> fields=prog.fieldDefs.stream().filter(f->hasField(c,f) && fieldForRepair(f)).toList();
+        // A selected opaque field can alias any tracked container, including one whose static type
+        // cannot hold references. Repair the whole metadata alias domain, importing tracked fields first.
+        if(!metadata.isEmpty() || !fields.isEmpty()) {
+            metadata=params.stream().filter(p->!p.isRef && !prog.hasElement(p.getTyp()) && !JavaTypes.primitiveTypes.contains(p.getTyp()) && !p.getTyp().equals("String")).toList();
+            fields=prog.fieldDefs.stream().filter(f->hasField(c,f) && (!JavaTypes.primitiveTypes.contains(f.getFieldType()) && !f.getFieldType().equals("String"))).toList();
+        }
         if(!referenceItems && refs.isEmpty() && metadata.isEmpty() && fields.isEmpty()) return;
         String elementType=getCommonSupertypeType();
         sb.append("    @Override public boolean zzHasReferences() { return true; }\n");
@@ -472,6 +478,13 @@ public class Generator {
         }
         if(trackedMetadata(c)) sb.append("        } finally { zzmetadataOwner.end(); }\n");
         sb.append("    }\n\n");
+    }
+
+    private boolean metadataForRepair(Parameter p) {
+        return !p.isRef && !prog.hasElement(p.getTyp()) && !JavaTypes.primitiveTypes.contains(p.getTyp()) && !p.getTyp().equals("String") && (prog.getMetadataAdapter()!=null || TypeUse.parse(p.getTyp()).containsNode(prog));
+    }
+    private boolean fieldForRepair(FieldDef f) {
+        return !JavaTypes.primitiveTypes.contains(f.getFieldType()) && !f.getFieldType().equals("String") && (prog.getMetadataAdapter()!=null || TypeUse.parse(f.getFieldType()).containsNode(prog));
     }
 
     private void lazyMetadataMapper(StringBuilder sb) {

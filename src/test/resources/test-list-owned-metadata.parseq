@@ -1,8 +1,17 @@
 package test.listmetadata
 typeprefix: LM
+modification counts: Node, Holder
 abstract syntax:
 Entries * Entry
+PlainEntries * Entry
 Entry()
+Node(@tracked java.util.List<String> data, Object memo)
+Holder(Entries entries)
 attributes:
 @tracked java.util.List<String> Entries.values
 java.util.List<String> Entries.alias
+
+Object Entries.observer
+
+@tracked java.util.List<String> PlainEntries.values
+java.util.List<String> PlainEntries.alias
