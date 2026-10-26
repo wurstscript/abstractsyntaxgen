@@ -437,17 +437,17 @@ public class Generator {
         List<Parameter> params=c instanceof ConstructorDef constructor ? constructor.parameters : List.of();
         boolean referenceItems=c instanceof ListDef list && list.ref;
         List<Parameter> refs=params.stream().filter(p->p.isRef && prog.hasElement(p.getTyp())).toList();
-        List<Parameter> metadata=params.stream().filter(p->!prog.hasElement(p.getTyp()) && !JavaTypes.primitiveTypes.contains(p.getTyp()) && !p.getTyp().equals("String")).toList();
-        List<FieldDef> fields=prog.fieldDefs.stream().filter(f->hasField(c,f) && !JavaTypes.primitiveTypes.contains(f.getFieldType()) && !f.getFieldType().equals("String")).toList();
+        List<Parameter> metadata=params.stream().filter(p->!prog.hasElement(p.getTyp()) && !JavaTypes.primitiveTypes.contains(p.getTyp()) && !p.getTyp().equals("String") && (prog.getMetadataAdapter()!=null || TypeUse.parse(p.getTyp()).containsNode(prog))).toList();
+        List<FieldDef> fields=prog.fieldDefs.stream().filter(f->hasField(c,f) && !JavaTypes.primitiveTypes.contains(f.getFieldType()) && !f.getFieldType().equals("String") && (prog.getMetadataAdapter()!=null || TypeUse.parse(f.getFieldType()).containsNode(prog))).toList();
         if(!referenceItems && refs.isEmpty() && metadata.isEmpty() && fields.isEmpty()) return;
         String elementType=getCommonSupertypeType();
         sb.append("    @Override public boolean zzHasReferences() { return true; }\n");
         sb.append("    @Override public void zzRepairReferences(java.util.IdentityHashMap<"+elementType+", "+elementType+"> copies) {\n");
         sb.append("        "+typePrefix+"NodeOwnership.before(this);\n");
-        sb.append("        var mapper=new "+typePrefix+"NodeGraphs.MetadataMapper(node -> copies.getOrDefault(node,node), "+typePrefix+"NodeGraphs.Adapter.DEFAULT);\n");
+        if(!metadata.isEmpty() || !fields.isEmpty()) sb.append("        var mapper=new "+typePrefix+"NodeGraphs.MetadataMapper(node -> copies.getOrDefault(node,node), "+typePrefix+"NodeGraphs.Adapter.DEFAULT);\n");
         if(referenceItems) sb.append("        for(int i=0;i<size();i++) { var mapped=copies.get(get(i));if(mapped!=null) set(i,("+printType(((ListDef)c).itemType)+")mapped); }\n");
         if(trackedMetadata(c)) sb.append("        zzmetadataOwner.begin();\n        try {\n");
-        for(Parameter p:refs) sb.append("        this."+p.name+" = ("+printType(p.getTyp())+")mapper.map(this."+p.name+");\n");
+        for(Parameter p:refs) sb.append("        this."+p.name+" = ("+printType(p.getTyp())+")copies.getOrDefault(this."+p.name+", this."+p.name+");\n");
         for(Parameter p:metadata) {
             String value="("+printType(p.getTyp())+")mapper.map(this."+p.name+")";
             if(p.isTracked()) sb.append("        zzAssign"+toFirstUpper(p.name)+"("+value+");\n");

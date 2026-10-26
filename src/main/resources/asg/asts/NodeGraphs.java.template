@@ -280,7 +280,10 @@ public final class __PREFIX__NodeGraphs {
         }
         private record Frame(Object input,Shape shape,boolean finish) { }
         public Object map(Object input) {
-            if(input==null) return null;
+            if(input==null || scalar(input)) return input;
+            if(copies.containsKey(input)) return copies.get(input);
+            if(input instanceof __PREFIX__Element node) { Object result=references.apply(node);copies.put(input,result);return result; }
+            if(shape(input,adapter)==null) return input;
             Set<Object> visiting=Collections.newSetFromMap(new IdentityHashMap<>());ArrayDeque<Frame> pending=new ArrayDeque<>();
             pending.push(new Frame(input,null,false));
             while(!pending.isEmpty()) {

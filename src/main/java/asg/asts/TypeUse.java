@@ -34,6 +34,9 @@ record TypeUse(String name, boolean nullable, List<TypeUse> arguments) {
         return (nullable ? "@org.eclipse.jdt.annotation.Nullable " : "")+names.apply(name)
             +(arguments.isEmpty() ? "" : "<"+String.join(", ",arguments.stream().map(a->a.render(names)).toList())+">");
     }
+    boolean containsNode(asg.asts.ast.Program program) {
+        return program.hasElement(name) || name.equals("Object") || name.equals("java.lang.Object") || arguments.stream().anyMatch(a->a.containsNode(program));
+    }
     void validateTracked(String field, boolean reference) {
         String raw=name.startsWith("java.util.") ? name.substring(10) : name;
         int arity=raw.equals("Map") ? 2 : Set.of("List","Set","Collection").contains(raw) ? 1 : -1;
