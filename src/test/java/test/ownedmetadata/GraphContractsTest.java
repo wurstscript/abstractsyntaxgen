@@ -234,6 +234,13 @@ class GraphContractsTest {
         var untracked=OM.Graph(OM.Nodes(),new LinkedHashMap<>(),map);
         assertEquals("binding",((Map<?,?>)((OMGraph)OMNodeGraphs.freeze(untracked,adapter).materialize(adapter)).getVariant()).get(foreign));
     }
+    @Test void trackedStructuralEqualityKeepsListNodeReferencesByIdentity() {
+        var a=OM.Nodes();var b=OM.Nodes();
+        assertFalse(OM.Raw(new ArrayList<>(List.of(a))).structuralEquals(OM.Raw(new ArrayList<>(List.of(b)))));
+        var first=new ForeignNode();var second=new ForeignNode();
+        assertFalse(OM.Raw(new ArrayList<>(List.of(first))).structuralEquals(OM.Raw(new ArrayList<>(List.of(second)))));
+        assertTrue(OM.Raw(new ArrayList<>(List.of(a))).structuralEquals(OM.Raw(new ArrayList<>(List.of(a)))));
+    }
     @Test void nestedReferencesAreVisitedWithoutFollowingTheirTargets() {
         var graph=graph();List<OMElement> references=new ArrayList<>();
         OMNodeGraphs.references(graph,references::add,CHOICE);

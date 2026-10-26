@@ -51,6 +51,7 @@ final class __PREFIX__TrackedMetadata {
             Pair pair=pending.pop(); Object a=pair.left(),b=pair.right();
             if(a==b) continue;
             if(a==null || b==null) return false;
+            if(a instanceof __PREFIX__Element || b instanceof __PREFIX__Element || __PREFIX__NodeGraphs.Adapter.DEFAULT.externalReference(a) || __PREFIX__NodeGraphs.Adapter.DEFAULT.externalReference(b)) return false;
             if(!seen.computeIfAbsent(a,k->Collections.newSetFromMap(new IdentityHashMap<>())).add(b)) continue;
             if(a instanceof List<?> first && b instanceof List<?> second) {
                 if(first.size()!=second.size()) return false;
