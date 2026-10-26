@@ -591,3 +591,17 @@ metadata. Identity-map bindings are unordered; object hash-table iteration never
 or comparison order. Scalar keys in identity maps retain their immutable object identities, and other
 external/custom identity keys require stable symbols. Container aliases are compared bijectively,
 so equal contents in two independent mutable containers do not become one shared container.
+
+`Adapter.mapKind` and `setKind` declare collection comparison semantics when a library interface does
+not describe its ordering. For example, a library may expose an insertion-ordered map as `SortedMap`
+while returning a null comparator and accepting non-comparable keys. Declare `MapKind.EQUALITY` for
+that type; generated copy, tracking and snapshot operations preserve its iteration order in a standard
+owned map. `MapKind.IDENTITY` and `SORTED` preserve identity lookup and comparator order respectively.
+This is a type policy, never a per-field copy list, and adds no library dependency to the generator.
+Opaque values with no structural references do not allocate a reference-repair context.
+
+`Adapter.externalReference` identifies nodes from another generated schema or another external graph.
+Such nodes remain reference leaves even if their Java class also implements `List`, `Set` or `Map`.
+They are never converted to metadata containers or traversed as collections. The generated schema's
+own nodes are recognized automatically, including list nodes. Snapshot encoding uses symbolic keys
+for foreign references; the caller resolves them in its compilation context.

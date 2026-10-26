@@ -5,6 +5,25 @@ import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GraphContractsTest {
+    static class InsertionMap<K,V> extends LinkedHashMap<K,V> implements SortedMap<K,V> {
+        public SortedMap<K,V> reversed() { throw new UnsupportedOperationException(); }
+        public Comparator<? super K> comparator() { return null; }
+        public K firstKey() { return keySet().iterator().next(); }
+        public K lastKey() { return new ArrayList<>(keySet()).getLast(); }
+        public SortedMap<K,V> subMap(K a,K b) { throw new UnsupportedOperationException(); }
+        public SortedMap<K,V> headMap(K b) { throw new UnsupportedOperationException(); }
+        public SortedMap<K,V> tailMap(K a) { throw new UnsupportedOperationException(); }
+    }
+    static class InsertionSet<T> extends LinkedHashSet<T> implements SortedSet<T> {
+        public SortedSet<T> reversed() { throw new UnsupportedOperationException(); }
+        public Comparator<? super T> comparator() { return null; }
+        public T first() { return iterator().next(); }
+        public T last() { return new ArrayList<>(this).getLast(); }
+        public SortedSet<T> subSet(T a,T b) { throw new UnsupportedOperationException(); }
+        public SortedSet<T> headSet(T b) { throw new UnsupportedOperationException(); }
+        public SortedSet<T> tailSet(T a) { throw new UnsupportedOperationException(); }
+    }
+    static class ForeignNode extends ArrayList<String> { }
     record Choice(boolean left,Object value) { }
     private static final OMNodeGraphs.Adapter CHOICE=new OMNodeGraphs.Adapter() {
         public OMNodeGraphs.Parts decompose(Object value) {
@@ -154,6 +173,32 @@ class GraphContractsTest {
             assertSame(copy.getData(),copy.getMemo());assertNotSame(list.getData(),copy.getMemo());
             copy.getMemo().add("copy");assertEquals(List.of("source"),list.getData());
         }
+    }
+    @Test void typeAdaptersDeclareInsertionOrderBehindSortedCollectionInterfaces() {
+        var a=OM.Leaf(new ArrayList<>(List.of("a")));var b=OM.Leaf(new ArrayList<>(List.of("b")));
+        var map=new InsertionMap<OMLeaf,List<OMLeaf>>();map.put(a,new ArrayList<>(List.of(b)));map.put(b,new ArrayList<>(List.of(a)));
+        var set=new InsertionSet<OMLeaf>();set.add(b);set.add(a);var graph=OM.Graph(OM.Nodes(a,b),map,set);
+        assertSame(b,graph.getLinks().get(a).get(0));
+        for(var copy:List.of(graph.copyWithRefs(),(OMGraph)OMNodeGraphs.copy(graph,OMNodeGraphs.Adapter.DEFAULT),(OMGraph)OMNodeGraphs.freeze(graph).materialize())) {
+            assertSame(copy.getNodes().get(1),copy.getLinks().get(copy.getNodes().get(0)).get(0));
+            assertEquals(List.of(copy.getNodes().get(1),copy.getNodes().get(0)),new ArrayList<>((Set<?>)copy.getVariant()));
+        }
+    }
+    @Test void foreignListShapedNodesRemainOpaqueReferences() {
+        var foreign=new ForeignNode();foreign.add("foreign");var graph=OM.Graph(OM.Nodes(),new LinkedHashMap<>(),foreign);
+        assertSame(foreign,graph.copyWithRefs().getVariant());
+        assertSame(foreign,((OMGraph)OMNodeGraphs.copy(graph,OMNodeGraphs.Adapter.DEFAULT)).getVariant());
+        var raw=OM.Raw(new ArrayList<>(List.of(foreign)));assertSame(foreign,raw.getValues().get(0));
+        int before=raw.modificationCount();foreign.add("reference edit");assertEquals(before,raw.modificationCount());
+        List<Object> slots=new ArrayList<>();OMNodeGraphs.referenceSlots(graph,(field,value)->slots.add(value),OMNodeGraphs.Adapter.DEFAULT);
+        assertEquals(List.of(foreign),slots);
+    }
+    @Test void generatedListNodesInsideTrackedMetadataAreReferenceLeaves() {
+        var target=OM.Nodes(OM.Leaf(new ArrayList<>()));var raw=OM.Raw(new ArrayList<>(List.of(target)));
+        assertSame(target,raw.getValues().get(0));assertNull(target.getParent());
+        int before=raw.modificationCount();target.add(OM.Leaf(new ArrayList<>()));assertEquals(before,raw.modificationCount());
+        List<OMElement> references=new ArrayList<>();OMNodeGraphs.references(raw,references::add);
+        assertEquals(List.of(target),references);
     }
     @Test void nestedReferencesAreVisitedWithoutFollowingTheirTargets() {
         var graph=graph();List<OMElement> references=new ArrayList<>();

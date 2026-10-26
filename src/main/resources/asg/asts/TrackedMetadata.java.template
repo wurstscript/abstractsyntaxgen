@@ -131,7 +131,8 @@ final class __PREFIX__TrackedMetadata {
         Frame(Object input, Box output) {
             this.input = input; this.output = output;
             Object source=input instanceof MapBox map ? map.data : input instanceof SetBox set ? set.data : input;
-            sortedMap=source instanceof SortedMap<?,?>;sortedSet=source instanceof SortedSet<?>;
+            sortedMap=source instanceof Map<?,?> map && __PREFIX__NodeGraphs.Adapter.DEFAULT.mapKind(map)==__PREFIX__NodeGraphs.MapKind.SORTED;
+            sortedSet=source instanceof Set<?> set && __PREFIX__NodeGraphs.Adapter.DEFAULT.setKind(set)==__PREFIX__NodeGraphs.SetKind.SORTED;
             mapEntries=sortedMap ? new ArrayList<>() : null;setEntries=sortedSet ? new ArrayList<>() : null;
             comparator=sortedMap ? (Comparator<Object>)((SortedMap<?,?>)source).comparator() : sortedSet ? (Comparator<Object>)((SortedSet<?>)source).comparator() : null;
             items = input instanceof Map<?, ?> map ? map.entrySet().iterator() : ((Collection<?>) input).iterator();
@@ -161,18 +162,23 @@ final class __PREFIX__TrackedMetadata {
             if (input instanceof List<?>) return new ListBox(context);
             if (input instanceof Map<?, ?>) {
                 Map<?, ?> original = input instanceof MapBox box ? box.data : (Map<?, ?>) input;
-                Map<Object,Object> data = original instanceof SortedMap sorted ? new TreeMap<>(sorted.comparator()) : original instanceof IdentityHashMap ? new IdentityHashMap<>() : new LinkedHashMap<>();
+                __PREFIX__NodeGraphs.MapKind kind=__PREFIX__NodeGraphs.Adapter.DEFAULT.mapKind(original);
+                if(kind==__PREFIX__NodeGraphs.MapKind.SORTED && !(original instanceof SortedMap)) throw new IllegalArgumentException("Sorted map policy requires SortedMap");
+                Map<Object,Object> data=kind==__PREFIX__NodeGraphs.MapKind.SORTED ? new TreeMap<>(((SortedMap)original).comparator()) : kind==__PREFIX__NodeGraphs.MapKind.IDENTITY ? new IdentityHashMap<>() : new LinkedHashMap<>();
                 return new MapBox(context, data);
             }
             if (input instanceof Set<?>) {
                 Set<?> original = input instanceof SetBox box ? box.data : (Set<?>) input;
-                Set<Object> data = original instanceof SortedSet sorted ? new TreeSet<>(sorted.comparator()) : new LinkedHashSet<>();
+                __PREFIX__NodeGraphs.SetKind kind=__PREFIX__NodeGraphs.Adapter.DEFAULT.setKind(original);
+                if(kind==__PREFIX__NodeGraphs.SetKind.SORTED && !(original instanceof SortedSet)) throw new IllegalArgumentException("Sorted set policy requires SortedSet");
+                Set<Object> data=kind==__PREFIX__NodeGraphs.SetKind.SORTED ? new TreeSet<>(((SortedSet)original).comparator()) : new LinkedHashSet<>();
                 return new SetBox(context, data);
             }
             throw new IllegalArgumentException("Unsupported owned metadata container: " + input.getClass().getName());
         }
         private Object shallow(Object input) {
             if (input == null) return null;
+            if (input instanceof __PREFIX__Element || __PREFIX__NodeGraphs.Adapter.DEFAULT.externalReference(input)) return input;
             if (input instanceof Box box && box.state().context == context) return box;
             if (!(input instanceof Collection<?>) && !(input instanceof Map<?, ?>)) {
                 if (input.getClass().isArray()) throw new IllegalArgumentException("Mutable arrays need an explicit metadata adapter");

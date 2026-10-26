@@ -444,28 +444,38 @@ public class Generator {
         sb.append("    @Override public boolean zzHasReferences() { return true; }\n");
         sb.append("    @Override public void zzRepairReferences(java.util.IdentityHashMap<"+elementType+", "+elementType+"> copies) {\n");
         sb.append("        "+typePrefix+"NodeOwnership.before(this);\n");
-        if(!metadata.isEmpty() || !fields.isEmpty()) sb.append("        var mapper=new "+typePrefix+"NodeGraphs.MetadataMapper(node -> copies.getOrDefault(node,node), "+typePrefix+"NodeGraphs.Adapter.DEFAULT);\n");
+        if(!metadata.isEmpty() || !fields.isEmpty()) sb.append("        "+typePrefix+"NodeGraphs.MetadataMapper mapper=null;\n");
         if(referenceItems) sb.append("        for(int i=0;i<size();i++) { var mapped=copies.get(get(i));if(mapped!=null) set(i,("+printType(((ListDef)c).itemType)+")mapped); }\n");
         if(trackedMetadata(c)) sb.append("        zzmetadataOwner.begin();\n        try {\n");
         for(Parameter p:refs) sb.append("        this."+p.name+" = ("+printType(p.getTyp())+")copies.getOrDefault(this."+p.name+", this."+p.name+");\n");
         for(boolean tracked:List.of(true,false)) {
             for(Parameter p:metadata) if(p.isTracked()==tracked) {
+                sb.append("        if("+typePrefix+"NodeGraphs.needsMapping(this."+p.name+", "+typePrefix+"NodeGraphs.Adapter.DEFAULT)) {\n");
+                lazyMetadataMapper(sb);
                 String mapped="mapper.map(this."+p.name+")";
                 if(!tracked && trackedMetadata(c)) mapped="zzmetadataOwner.alias("+mapped+")";
                 String value="("+printType(p.getTyp())+")"+mapped;
                 if(tracked) sb.append("        zzAssign"+toFirstUpper(p.name)+"("+value+");\n");
                 else sb.append("        this."+p.name+" = "+value+";\n");
+                sb.append("        }\n");
             }
             for(FieldDef f:fields) if(f.isTracked()==tracked) {
+                sb.append("        if("+typePrefix+"NodeGraphs.needsMapping(this."+f.getFieldName()+", "+typePrefix+"NodeGraphs.Adapter.DEFAULT)) {\n");
+                lazyMetadataMapper(sb);
                 String mapped="mapper.map(this."+f.getFieldName()+")";
                 if(!tracked && trackedMetadata(c)) mapped="zzmetadataOwner.alias("+mapped+")";
                 String value="("+printType(f.getFieldType())+")"+mapped;
                 if(tracked) sb.append("        zzAssign"+toFirstUpper(f.getFieldName())+"("+value+");\n");
                 else sb.append("        this."+f.getFieldName()+" = "+value+";\n");
+                sb.append("        }\n");
             }
         }
         if(trackedMetadata(c)) sb.append("        } finally { zzmetadataOwner.end(); }\n");
         sb.append("    }\n\n");
+    }
+
+    private void lazyMetadataMapper(StringBuilder sb) {
+        sb.append("            if(mapper==null) mapper=new "+typePrefix+"NodeGraphs.MetadataMapper(node -> copies.getOrDefault(node,node), "+typePrefix+"NodeGraphs.Adapter.DEFAULT);\n");
     }
 
     /**

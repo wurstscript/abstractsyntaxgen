@@ -12,8 +12,14 @@ public final class __PREFIX__NodeGraphs {
     public record Parts(String tag, List<?> values) {
         public Parts { Objects.requireNonNull(tag); values=Collections.unmodifiableList(new ArrayList<>(values)); }
     }
+    public enum MapKind { EQUALITY, IDENTITY, SORTED }
+    public enum SetKind { EQUALITY, SORTED }
     public interface Adapter {
         Adapter DEFAULT=__ADAPTER__;
+        /** Override for libraries which use SortedMap as an insertion-order interface. */
+        default MapKind mapKind(Map<?,?> value) { return value instanceof IdentityHashMap ? MapKind.IDENTITY : value instanceof SortedMap ? MapKind.SORTED : MapKind.EQUALITY; }
+        default SetKind setKind(Set<?> value) { return value instanceof SortedSet ? SetKind.SORTED : SetKind.EQUALITY; }
+        default boolean externalReference(Object value) { return false; }
         default Parts decompose(Object value) { return null; }
         default Object compose(String tag,List<Object> values) { throw new IllegalArgumentException("No metadata adapter for " + tag); }
         default Symbol symbol(String field,Object value) {
@@ -33,32 +39,37 @@ public final class __PREFIX__NodeGraphs {
     }
     @SuppressWarnings({"rawtypes","unchecked"})
     private static Shape shape(Object value,Adapter adapter) {
+        if(value instanceof __PREFIX__Element || adapter.externalReference(value)) return null;
         if(value instanceof Container container) { Parts parts=container.zzParts();return new Shape(parts.tag(),new ArrayList<>(parts.values())); }
         Parts custom=adapter.decompose(value);
         if(custom!=null) return new Shape("custom:"+custom.tag(),new ArrayList<>(custom.values()));
-        if(value instanceof SortedMap<?,?> map) {
-            List<Object> values=new ArrayList<>();values.add(map.comparator());
-            for(var entry:map.entrySet()) { stableKey(entry.getKey());values.add(entry.getKey());values.add(entry.getValue()); }
-            return new Shape("sorted-map",values);
-        }
         if(value instanceof Map<?,?> map) {
             if(value instanceof EnumMap) throw new IllegalArgumentException("EnumMap needs a metadata adapter preserving its empty key type");
-            List<Object> values=new ArrayList<>();
+            MapKind kind=Objects.requireNonNull(adapter.mapKind(map));List<Object> values=new ArrayList<>();
+            if(kind==MapKind.SORTED) {
+                if(!(map instanceof SortedMap<?,?> sorted)) throw new IllegalArgumentException("Sorted map policy requires SortedMap");
+                values.add(sorted.comparator());
+            }
             for(var entry:map.entrySet()) { stableKey(entry.getKey());values.add(entry.getKey());values.add(entry.getValue()); }
-            return new Shape(value instanceof IdentityHashMap ? "identity-map" : "map",values);
+            return new Shape(kind==MapKind.SORTED ? "sorted-map" : kind==MapKind.IDENTITY ? "identity-map" : "map",values);
         }
         if(value instanceof List<?> list) return new Shape("list",new ArrayList<>(list));
-        if(value instanceof SortedSet<?> set) {
-            List<Object> values=new ArrayList<>();values.add(set.comparator());
-            for(Object item:set) { stableKey(item);values.add(item); }
-            return new Shape("sorted-set",values);
-        }
         if(value instanceof Set<?> set) {
-            List<Object> values=new ArrayList<>();for(Object item:set) { stableKey(item);values.add(item); }
-            return new Shape("set",values);
+            SetKind kind=Objects.requireNonNull(adapter.setKind(set));List<Object> values=new ArrayList<>();
+            if(kind==SetKind.SORTED) {
+                if(!(set instanceof SortedSet<?> sorted)) throw new IllegalArgumentException("Sorted set policy requires SortedSet");
+                values.add(sorted.comparator());
+            }
+            for(Object item:set) { stableKey(item);values.add(item); }
+            return new Shape(kind==SetKind.SORTED ? "sorted-set" : "set",values);
         }
         if(value instanceof Optional<?> optional) return new Shape("optional",optional.isPresent() ? List.of(optional.get()) : List.of());
         return null;
+    }
+    /** Avoid allocating a repair context for opaque immutable metadata with no structural references. */
+    public static boolean needsMapping(Object value,Adapter adapter) {
+        return value!=null && !scalar(value) && !adapter.externalReference(value) && (value instanceof __PREFIX__Element || value instanceof Map<?,?>
+            || value instanceof List<?> || value instanceof Set<?> || value instanceof Optional<?> || adapter.decompose(value)!=null);
     }
     private static void stableKey(Object key) {
         if(key instanceof Collection<?> || key instanceof Map<?,?> || key!=null && key.getClass().isArray())
@@ -442,6 +453,7 @@ public final class __PREFIX__NodeGraphs {
                 while(!pending.isEmpty()) {
                     Object next=pending.pop();
                     if(next instanceof __PREFIX__Element target) visitor.accept(field,target);
+                    else if(adapter.externalReference(next)) visitor.accept(field,next);
                     else if(!scalar(next) && seen.add(next)) {
                         Shape shape=shape(next,adapter);
                         if(shape!=null) for(int i=shape.values().size()-1;i>=0;i--) { Object part=shape.values().get(i);if(part!=null) pending.push(part); }
