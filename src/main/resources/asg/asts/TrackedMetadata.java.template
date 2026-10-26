@@ -104,6 +104,7 @@ final class __PREFIX__TrackedMetadata {
     }
 
     private static void key(Object value) {
+        if (value instanceof __PREFIX__Element || __PREFIX__NodeGraphs.Adapter.DEFAULT.externalReference(value)) return;
         if (value instanceof Collection<?> || value instanceof Map<?, ?> || value != null && value.getClass().isArray()) {
             throw new IllegalArgumentException("Owned metadata keys and set members must be stable values or node references");
         }

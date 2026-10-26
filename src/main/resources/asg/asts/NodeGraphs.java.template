@@ -50,7 +50,7 @@ public final class __PREFIX__NodeGraphs {
                 if(!(map instanceof SortedMap<?,?> sorted)) throw new IllegalArgumentException("Sorted map policy requires SortedMap");
                 values.add(sorted.comparator());
             }
-            for(var entry:map.entrySet()) { stableKey(entry.getKey());values.add(entry.getKey());values.add(entry.getValue()); }
+            for(var entry:map.entrySet()) { stableKey(entry.getKey(),adapter);values.add(entry.getKey());values.add(entry.getValue()); }
             return new Shape(kind==MapKind.SORTED ? "sorted-map" : kind==MapKind.IDENTITY ? "identity-map" : "map",values);
         }
         if(value instanceof List<?> list) return new Shape("list",new ArrayList<>(list));
@@ -60,7 +60,7 @@ public final class __PREFIX__NodeGraphs {
                 if(!(set instanceof SortedSet<?> sorted)) throw new IllegalArgumentException("Sorted set policy requires SortedSet");
                 values.add(sorted.comparator());
             }
-            for(Object item:set) { stableKey(item);values.add(item); }
+            for(Object item:set) { stableKey(item,adapter);values.add(item); }
             return new Shape(kind==SetKind.SORTED ? "sorted-set" : "set",values);
         }
         if(value instanceof Optional<?> optional) return new Shape("optional",optional.isPresent() ? List.of(optional.get()) : List.of());
@@ -71,7 +71,8 @@ public final class __PREFIX__NodeGraphs {
         return value!=null && !scalar(value) && !adapter.externalReference(value) && (value instanceof __PREFIX__Element || value instanceof Map<?,?>
             || value instanceof List<?> || value instanceof Set<?> || value instanceof Optional<?> || adapter.decompose(value)!=null);
     }
-    private static void stableKey(Object key) {
+    private static void stableKey(Object key,Adapter adapter) {
+        if(key instanceof __PREFIX__Element || adapter.externalReference(key)) return;
         if(key instanceof Collection<?> || key instanceof Map<?,?> || key!=null && key.getClass().isArray())
             throw new IllegalArgumentException("Metadata map keys and set members must be stable values or node references");
     }

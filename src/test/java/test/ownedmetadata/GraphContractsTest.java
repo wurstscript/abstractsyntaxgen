@@ -200,6 +200,40 @@ class GraphContractsTest {
         List<OMElement> references=new ArrayList<>();OMNodeGraphs.references(raw,references::add);
         assertEquals(List.of(target),references);
     }
+    @Test void listShapedNodeKeysRemainReferenceLeavesInTrackedMetadata() {
+        var target=OM.Nodes(OM.Leaf(new ArrayList<>()));var map=new IdentityHashMap<Object,Object>();map.put(target,"binding");
+        var members=new LinkedHashSet<Object>();members.add(target);
+        var raw=OM.Raw(new ArrayList<>(List.of(map,members)));
+        for(var copy:List.of(raw,raw.copyWithRefs(),(OMRaw)OMNodeGraphs.copy(raw,OMNodeGraphs.Adapter.DEFAULT))) {
+            assertEquals("binding",((Map<?,?>)copy.getValues().get(0)).get(target));
+            assertSame(target,((Set<?>)copy.getValues().get(1)).iterator().next());
+        }
+        assertNull(target.getParent());
+    }
+    @Test void frozenListNodeKeysResolveToOwnedCopies() {
+        for(boolean set:List.of(false,true)) {
+            var nodes=OM.Nodes(OM.Leaf(new ArrayList<>()));Object metadata;
+            if(set) metadata=new LinkedHashSet<>(List.of(nodes));
+            else {var map=new IdentityHashMap<Object,Object>();map.put(nodes,"binding");metadata=map;}
+            var graph=OM.Graph(nodes,new LinkedHashMap<>(),metadata);var frozen=OMNodeGraphs.freeze(graph);
+            var copy=(OMGraph)frozen.materialize();Object key=set ? ((Set<?>)copy.getVariant()).iterator().next() : ((Map<?,?>)copy.getVariant()).keySet().iterator().next();
+            assertSame(copy.getNodes(),key);assertNotSame(nodes,key);assertEquals(frozen,OMNodeGraphs.freeze(copy));
+        }
+    }
+    @Test void foreignListNodeKeysUseAdapterSymbolsWithoutTraversingTheirContents() {
+        var foreign=new ForeignNode();foreign.add("external");
+        var adapter=new SchemaMetadataAdapter() {
+            public OMNodeGraphs.Symbol symbol(String field,Object value) {assertSame(foreign,value);return new OMNodeGraphs.Symbol("foreign","one");}
+            public Object resolve(OMNodeGraphs.Symbol symbol) {return foreign;}
+        };
+        var map=new IdentityHashMap<Object,Object>();map.put(foreign,"binding");var set=new LinkedHashSet<Object>();set.add(foreign);
+        var raw=OM.Raw(new ArrayList<>(List.of(map,set)));var frozen=OMNodeGraphs.freeze(raw,adapter);
+        var restored=(OMRaw)frozen.materialize(adapter);
+        assertEquals("binding",((Map<?,?>)restored.getValues().get(0)).get(foreign));
+        assertSame(foreign,((Set<?>)restored.getValues().get(1)).iterator().next());
+        var untracked=OM.Graph(OM.Nodes(),new LinkedHashMap<>(),map);
+        assertEquals("binding",((Map<?,?>)((OMGraph)OMNodeGraphs.freeze(untracked,adapter).materialize(adapter)).getVariant()).get(foreign));
+    }
     @Test void nestedReferencesAreVisitedWithoutFollowingTheirTargets() {
         var graph=graph();List<OMElement> references=new ArrayList<>();
         OMNodeGraphs.references(graph,references::add,CHOICE);
